@@ -4,7 +4,7 @@ from abc import ABC, abstractmethod
 from datetime import datetime
 from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
 
-from .types import ToolCall, ToolResult
+from .types import ToolCall
 
 
 class ToolBase(ABC):
@@ -62,22 +62,6 @@ class ThinkTool(ToolBase):
         return kwargs.get("notes", "")
 
 
-class FinalTool(ToolBase):
-    name = "final"
-    description = "Deliver the final user-facing answer and terminate."
-    parameters = [
-        {
-            "name": "answer",
-            "type": "string",
-            "description": "Message to show to the user.",
-            "required": True,
-        }
-    ]
-
-    def call(self, context: Dict[str, Any], **kwargs) -> str:
-        return kwargs.get("answer", "")
-
-
 class Environment(ABC):
     """Abstract interface for agent environments."""
 
@@ -96,7 +80,7 @@ class Environment(ABC):
         raise NotImplementedError
 
     @abstractmethod
-    def execute_tool(self, name: str, args: Dict[str, Any], context: Dict[str, Any]) -> ToolResult:
+    def execute_tool(self, name: str, args: Dict[str, Any], context: Dict[str, Any]) -> str:
         raise NotImplementedError
 
     @abstractmethod
@@ -111,26 +95,25 @@ class Environment(ABC):
     def step(
         self,
         actions: Optional[List[Optional[ToolCall]]],
+        final_response: Optional[str] = None,
         label: Optional[str] = None,
         runtime: bool = False,
-    ) -> Tuple[List[str], float, bool]:
+    ) -> Tuple[List[str], float, bool, Optional[str]]:
         raise NotImplementedError
 
 
 SYSTEM_TEMPLATE = """
 You are a helpful agent assistant.
 
-You may draft or think internally, but anything outside tool calls is invisible to the user.
-All user-visible communication must go through tool calls.
+You may call tools to plan privately, but anything outside tool calls is visible to the user.
 
 Knowledge cutoff: 2023-06
 Current date: {date}
 
 Rules:
-- One tool call per step. And each step with exactly one <tool_call>…</tool_call>.
-- Free text before/after the tool call is treated as internal and will not be shown.
-- If information is missing or you need to plan, call think(...) before calling final(...).
-- Use final(...) only to deliver the final user-facing answer and end the task.
+- Use think(notes=...) when you need to plan internally; its output is hidden from the user.
+- To answer the user, provide plain text outside of <tool_call> tags. That text will end the task.
+- Each tool call must be enclosed in a <tool_call>{{...}}</tool_call> block containing JSON arguments.
 """.strip()
 
 
@@ -156,10 +139,10 @@ def compute_reward(
 
 
 class ReActEnvironment(Environment):
-    """Default environment with think/final tool semantics."""
+    """Default environment with a private think tool and plain-text finals."""
 
     def __init__(self, *, max_steps: int = 66):
-        self.registry = ToolRegistry([ThinkTool(), FinalTool()])
+        self.registry = ToolRegistry([ThinkTool()])
         self._init_observation: Optional[str] = None
         self._max_steps = max_steps
         self._step_idx = 0
@@ -178,14 +161,10 @@ class ReActEnvironment(Environment):
     def tools_manifest(self) -> List[Dict[str, Any]]:
         return self.registry.list_openai_tools()
 
-    def execute_tool(self, name: str, args: Dict[str, Any], context: Dict[str, Any]) -> ToolResult:
+    def execute_tool(self, name: str, args: Dict[str, Any], context: Dict[str, Any]) -> str:
         tool = self.registry.get(name)
         out = tool.call(context=context, **(args or {}))
-        return ToolResult(
-            tool_call_id=context.get("tool_call_id", ""),
-            content=str(out),
-            is_error=False,
-        )
+        return str(out)
 
     # -------------------------------------------------------------- lifecycle
 
@@ -220,13 +199,13 @@ class ReActEnvironment(Environment):
             "visible_to_user": False,
             "error": {"code": code, "message": message},
             "policy": {
-                "user_visible_only_via_tools": True,
-                "must_end_with_single_tool_call": True,
+                "planning_requires_tools": True,
+                "final_response_must_be_plain_text": True,
             },
             "next_action_suggestion": {
                 "name": "think",
                 "arguments_schema": {"notes": "string"},
-                "why": "Close the step with a single tool call; plan briefly before proceeding.",
+                "why": "Call think(notes=...) to plan, then finish with plain-text responses when ready to finalize.",
             },
             "allowed_tools": list(self.registry.names()),
         }
@@ -241,28 +220,30 @@ class ReActEnvironment(Environment):
     def step(
         self,
         actions: Optional[List[Optional[ToolCall]]],
+        final_response: Optional[str] = None,
         label: Optional[str] = None,
         runtime: bool = False,
-    ) -> Tuple[List[str], float, bool]:
+    ) -> Tuple[List[str], float, bool, Optional[str]]:
         if actions is None:
             obs = self._internal_obs(
                 code="no_tool_call",
-                message="No tool call captured this step. Close the step with exactly one tool call.",
-                hint="Prefer think(notes=...) if you need to plan before final.",
+                message="No tool call captured and no final response provided.",
+                hint="Wrap tool calls in <tool_call> tags or reply with plain text for the final answer.",
             )
-            return [obs], 0.0, False
+            return [obs], 0.0, False, None
 
         allowed_tools = set(self.registry.names())
         next_observations: List[str] = []
         total_reward = 0.0
         terminated = False
+        final_payload: Optional[str] = None
 
         for idx, action in enumerate(actions):
             if terminated:
                 next_observations.append(
                     self._internal_obs(
                         code="ignored_after_final",
-                        message=f"Action #{idx} ignored because 'final' has already been called.",
+                        message=f"Action #{idx} ignored because a final response has already been provided.",
                         extras={"action_index": idx, "allowed_tools": list(allowed_tools)},
                     )
                 )
@@ -280,7 +261,32 @@ class ReActEnvironment(Environment):
                 continue
 
             name = action.name
-            args = action.arguments
+            raw_arguments = action.arguments or "{}"
+            try:
+                args = json.loads(raw_arguments)
+            except Exception:
+                next_observations.append(
+                    self._internal_obs(
+                        code="invalid_arguments_json",
+                        message="Tool arguments must be valid JSON.",
+                        tool=name,
+                        hint="Ensure the value inside <tool_call> is JSON-formatted.",
+                        extras={"arguments": raw_arguments, "action_index": idx},
+                    )
+                )
+                continue
+
+            if not isinstance(args, dict):
+                next_observations.append(
+                    self._internal_obs(
+                        code="invalid_arguments_schema",
+                        message="Tool arguments must be a JSON object.",
+                        tool=name,
+                        hint="Use key/value pairs for arguments.",
+                        extras={"arguments": args, "action_index": idx},
+                    )
+                )
+                continue
 
             if name not in allowed_tools:
                 next_observations.append(
@@ -320,9 +326,8 @@ class ReActEnvironment(Environment):
                 continue
 
             try:
-                context = {"tool_call_id": action.id}
-                tool_result = self.execute_tool(name=name, args=args, context=context)
-                obs_text = tool_result.content
+                context = {"tool_call_id": action.id, "call_id": action.call_id}
+                obs_text = self.execute_tool(name=name, args=args, context=context)
             except Exception as exc:  # pragma: no cover - defensive
                 next_observations.append(
                     self._internal_obs(
@@ -335,19 +340,37 @@ class ReActEnvironment(Environment):
                 )
                 continue
 
-            next_observations.append(obs_text)
+            if name == "think":
+                next_observations.append(
+                    self._internal_obs(
+                        code="think_notes",
+                        message="Captured private notes via think().",
+                        extras={
+                            "notes": obs_text,
+                            "action_index": idx,
+                        },
+                    )
+                )
+            else:
+                next_observations.append(obs_text)
 
             if not runtime:
                 total_reward += self.reward_hook(name, args, label)
 
-            if name == "final":
+        if final_response is not None:
+            final_payload = final_response.strip()
+            if final_payload:
                 terminated = True
+                if not runtime:
+                    total_reward += self.reward_hook("final", {"answer": final_payload}, label)
+            else:
+                final_payload = None
 
         self._step_idx += 1
         if self._step_idx >= self.max_steps:
             terminated = True
 
-        return next_observations, total_reward, terminated
+        return next_observations, total_reward, terminated, final_payload
 
 
 def make_environment(name: Optional[str] = None, **kwargs: Any) -> Environment:

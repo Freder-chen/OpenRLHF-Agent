@@ -1,11 +1,11 @@
 import json
 from dataclasses import dataclass
-from typing import Any, Dict, List, Optional, Sequence, Tuple
+from typing import Any, Dict, List, Optional, Sequence
 
 from .environment import Environment
 from .model import LLMEngine
 from .template import Template
-from .types import ToolCall
+from .types import ParsedAssistantMessage, ToolCall
 
 
 @dataclass
@@ -15,6 +15,7 @@ class AgentStepResult:
     terminated: bool
     rendered_observation: str
     actions: Optional[List[Optional[ToolCall]]]
+    final_response: Optional[str] = None
     parse_error: bool = False
 
 
@@ -45,25 +46,32 @@ class AgentSession:
             add_generation_prompt=True,
         )
 
-    def parse_actions(self, text: str) -> Tuple[bool, Optional[List[Optional[ToolCall]]]]:
-        parse_error, actions = self.template.extract_tool_calls_from_text(text)
-        return parse_error, actions
+    def parse_actions(self, text: str) -> ParsedAssistantMessage:
+        return self.template.parse_assistant_message(text)
 
     def step(
         self,
         actions: Optional[Sequence[ToolCall | None]],
         *,
+        final_response: Optional[str] = None,
         label: Optional[str] = None,
         runtime: bool = False,
         parse_error: bool = False,
     ) -> AgentStepResult:
-        observations, reward, terminated = self.environment.step(actions, label, runtime=runtime)
+        actions_list = list(actions) if actions is not None else None
+        observations, reward, terminated, resolved_final = self.environment.step(
+            actions_list,
+            final_response,
+            label,
+            runtime=runtime,
+        )
         return AgentStepResult(
             observations=observations,
             reward=reward,
             terminated=terminated,
             rendered_observation=self.build_user_turn(observations),
-            actions=actions,
+            actions=actions_list,
+            final_response=resolved_final,
             parse_error=parse_error,
         )
 
@@ -74,10 +82,24 @@ class AgentSession:
         label: Optional[str] = None,
         runtime: bool = False,
     ) -> AgentStepResult:
-        parse_error, actions = self.parse_actions(action_text)
-        if parse_error or not actions:
+        parsed = self.parse_actions(action_text)
+
+        if parsed.parse_error and not parsed.tool_calls and parsed.final_response is None:
             return self.step(None, label=label, runtime=runtime, parse_error=True)
-        return self.step(actions, label=label, runtime=runtime)
+
+        actions: Optional[Sequence[ToolCall | None]]
+        if parsed.tool_calls:
+            actions = parsed.tool_calls
+        else:
+            actions = []
+
+        return self.step(
+            actions,
+            final_response=parsed.final_response,
+            label=label,
+            runtime=runtime,
+            parse_error=parsed.parse_error,
+        )
 
 
 class AgentRuntime:
@@ -99,10 +121,7 @@ class AgentRuntime:
 
     @staticmethod
     def _is_internal_obs(text: str) -> bool:
-        """
-        Internal observations are JSON payloads with __internal=true (by our env design).
-        Tool outputs (think/final) are plain text; they should NOT be JSON.
-        """
+        """Return True if the observation should stay hidden from the user."""
         try:
             data = json.loads(text)
             return isinstance(data, dict) and (data.get("__internal") is True or data.get("visible_to_user") is False)
@@ -110,13 +129,7 @@ class AgentRuntime:
             return False
 
     def run_steps(self, messages: List[Dict[str, str]]):
-        """
-        Streaming generator that yields OpenAI-compliant chat messages:
-          - Assistant tool request: {"role": "assistant", "content": "", "tool_calls": [...]}
-          - Tool response:         {"role": "tool", "tool_call_id": "...", "content": "..."}
-          - Final answer:          {"role": "assistant", "content": "..."}
-          - Error:                 {"role": "assistant", "content": "..."}  # e.g. parse failure
-        """
+        """Stream messages that mirror the openai-python Responses format."""
         self.session.reset()
 
         prompt = self.template.render_messages(
@@ -133,9 +146,12 @@ class AgentRuntime:
 
             step_result = self.session.step_from_text(action_text, runtime=True)
 
-            if step_result.parse_error:
-                # surface the raw model text so downstream logs can inspect it
-                yield {"role": "assistant", "content": action_text}
+            if step_result.parse_error and not step_result.actions:
+                # Surface the raw model text so downstream logs can inspect it.
+                yield {
+                    "role": "assistant",
+                    "content": action_text,
+                }
                 observation_ids = self.engine.tokenize(step_result.rendered_observation)
                 prompt_ids += action_ids + observation_ids
                 continue
@@ -151,13 +167,17 @@ class AgentRuntime:
                         "type": "function",
                         "function": {
                             "name": action.name,
-                            "arguments": json.dumps(action.arguments or {}, ensure_ascii=False),
+                            "arguments": action.arguments or "{}",
                         },
                     }
                 )
 
             if tool_calls:
-                yield {"role": "assistant", "content": "", "tool_calls": tool_calls}
+                yield {
+                    "role": "assistant",
+                    "content": "",
+                    "tool_calls": tool_calls,
+                }
 
             for idx, obs in enumerate(step_result.observations):
                 action = actions[idx] if idx < len(actions) else None
@@ -174,15 +194,17 @@ class AgentRuntime:
             prompt_ids += action_ids + observation_ids
 
             if step_result.terminated:
-                final_text = ""
-                for o in reversed(step_result.observations):
-                    if not self._is_internal_obs(o):
-                        final_text = o
-                        break
-                yield {"role": "assistant", "content": final_text}
+                final_text = step_result.final_response or ""
+                yield {
+                    "role": "assistant",
+                    "content": final_text,
+                }
                 return
 
-        yield {"role": "assistant", "content": "Max steps reached without final."}
+        yield {
+            "role": "assistant",
+            "content": "Max steps reached without final.",
+        }
 
     def run_final(self, messages: List[Dict[str, str]]) -> Optional[str]:
         """
@@ -195,7 +217,7 @@ class AgentRuntime:
             if "tool_calls" in step:
                 continue
             content = step.get("content")
-            if content is not None:
+            if isinstance(content, str):
                 final_text = content
         return final_text
 

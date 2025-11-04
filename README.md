@@ -8,7 +8,7 @@ OpenRLHF-Agent provides a shared runtime that covers environment orchestration, 
 
 - **Training and inference stay aligned**: the identical `AgentSession` flow drives resets, tool calls, and transcript rendering across phases.
 - **Lean agent primitives**: a minimal set of modules (`AgentRuntime`, `Environment`, `Template`, `LLMEngine`, and shared `types`) makes the runtime easy to audit and extend.
-- **Tool-centric design**: bundled `think` and `final` helpers demonstrate ReAct-style loops out of the box.
+- **Tool-centric design**: bundled `think` helper demonstrates ReAct-style loops while final answers ship as plain assistant text.
 - **Production-ready examples**: Qwen-3 samples cover inference serving, RL data collection, and REINFORCE++ training.
 - **Optimized for OpenRLHF**: plug `AgentRuntime` into `train_reinforce_agent.sh` or Ray jobs without extra glue code.
 
@@ -75,7 +75,7 @@ python examples/qwen3/runtime_demo.py
 The script wires together:
 
 - `OpenAIEngine` pointing at a vLLM/OpenAI-compatible endpoint.
-- `DefaultEnvironment` with `think` / `final` tools and feedback hooks.
+- `DefaultEnvironment` with the `think` tool, feedback hooks, and plain-text finals.
 - `make_template("qwen3")` for prompt rendering and `<tool_call>` parsing.
 
 You will see tool traces and the final answer printed to the console.

@@ -1,20 +1,17 @@
-from dataclasses import dataclass, field
-from typing import Any, Dict
+from dataclasses import dataclass
+from typing import List, Optional
+
+from openai.types.responses import ResponseFunctionToolCallItem
+
+
+# Re-export the canonical OpenAI function-call tool schema for intra-runtime use.
+ToolCall = ResponseFunctionToolCallItem
 
 
 @dataclass
-class ToolCall:
-    """Structured representation of a tool call emitted by the model."""
+class ParsedAssistantMessage:
+    """Structured output from template parsing of an assistant turn."""
 
-    id: str
-    name: str
-    arguments: Dict[str, Any] = field(default_factory=dict)
-
-
-@dataclass
-class ToolResult:
-    """Container for tool execution output that is fed back to the model."""
-
-    tool_call_id: str
-    content: str
-    is_error: bool = False
+    parse_error: bool
+    tool_calls: List[Optional[ToolCall]]
+    final_response: Optional[str]
