@@ -1,10 +1,10 @@
-import time
-import torch
 import logging
+import torch
 
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict
 from openrlhf_agent.environment import make_environment
 from openrlhf_agent.template import make_template
+from openrlhf_agent.runtime.session import AgentSession
 from openrlhf.utils.agent import AgentExecutorBase, AgentInstanceBase
 
 logging.basicConfig()
@@ -15,79 +15,41 @@ logger.setLevel(logging.INFO)
 class AgentInstance(AgentInstanceBase):
     async def __init__(self, *args, **kwargs):
         self.step_idx = 0
-        self.environment = make_environment(name="default")
-        self.template = make_template("qwen3")
-        # self.max_steps = self.environment.max_steps
+        environment = make_environment(name="default")
+        template = make_template("qwen3")
+        self.session = AgentSession(environment, template)
 
     async def reset(self, states: dict, **kwargs):
         self.step_idx = 0
+        self.session.reset(states.get("observation"))
 
-        self.environment.reset(states.get("observation"))  # TODO: message | question
-
-        system_prompt = self.template.render_system(
-            self.environment.system_prompt,
-            tools_manifest=self.environment.tools_manifest(),
-        )
+        system_prompt = self.session.build_system_prompt()
         observation = system_prompt + states["observation"]
-        return {"observation": observation}  # Return original text observation
-
-    def _render_obs_block(self, obs_list: List[str]) -> str:
-        """Wrap each observation via template.render_tool_response and join."""
-        return "\n".join(self.template.render_tool_response(o) for o in obs_list)
+        return {"observation": observation}
 
     async def step(self, states: dict, **kwargs) -> Dict[str, Any]:
-        # print(f"step_idx: {self.step_idx}, max_steps: {self.max_steps}")
-
-        observation_text: str = states.get("observation_text", "")
         action_text: str = states.get("action_text", "")
-        label: Optional[str] = states.get("label")
+        label = states.get("label")
 
-        # apply action and receive next observation, reward and whether the episode has ended
-        tool_call_parse_error, actions = self.template.extract_tool_calls_from_text(action_text)
-        if tool_call_parse_error or not actions:
-            obs_list, reward, done = self.environment.step(None, label)
-            next_observation = self.template.render_turn(
-                role="user",
-                text=self._render_obs_block(obs_list),
-                add_generation_prompt=True,
-            )
-        
-        else:
-            obs_list, reward, done = self.environment.step(actions, label)
-            next_observation = self.template.render_turn(
-                role="user",
-                text=self._render_obs_block(obs_list),
-                add_generation_prompt=True,
-            )
+        step_result = self.session.step_from_text(action_text, label=label)
 
+        reward = step_result.reward
         if reward < -1:
             reward = -1.0
 
-        # logger.info
-        # print({
-        #     "INFO": "##INFO##",
-        #     "action": action_text,
-        #     "observation": next_observation,
-        #     "reward": reward,
-        #     "done": done,
-        #     "step_idx": self.step_idx,
-        # })
-
-        # Check if episode is done
         self.step_idx += 1
-        # if self.step_idx >= self.max_steps:
-        #     done = True
+        done = step_result.terminated
 
         return {
-            "rewards": torch.tensor(reward),  # Rewards for advantage calculation
-            "scores": torch.tensor(reward),  # Scores for dynamic filtering (0-1 reward)
-            "environment_feedback": "" if done else next_observation,  # Environment feedback text
-            "done": done,  # Boolean indicating if the episode is complete
-            "sampling_params": states.get("sampling_params", None),  # Parameters for vLLM sampling in next step
+            "rewards": torch.tensor(reward),
+            "scores": torch.tensor(reward),
+            "environment_feedback": "" if done else step_result.rendered_observation,
+            "done": done,
+            "sampling_params": states.get("sampling_params", None),
             "extra_logs": {
                 "dummy_scores": torch.tensor(reward),
                 "turn_count": torch.tensor(self.step_idx),
-            },  # Additional logging information
+            },
         }
 
 
@@ -96,5 +58,4 @@ class AgentExecutor(AgentExecutorBase):
         super().__init__(AgentInstance, max_steps, max_length, llm_engine, hf_tokenizer, result_queue)
 
     async def execute(self, prompt, label, sampling_params):
-        # You could override the execute function of AgentExecutorBase to add custom agent running logic
         return await super().execute(prompt, label, sampling_params)
