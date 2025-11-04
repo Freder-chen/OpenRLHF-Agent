@@ -13,7 +13,7 @@ __version__ = "0.0.1"
 
 from .agent import AgentRuntime, AgentSession
 from .environment import make_environment
-from .model import LLMEngine, OpenAIEngine
+from .model import OpenAIEngine
 from .template import make_template
 
 __all__ = [
@@ -22,6 +22,5 @@ __all__ = [
     "AgentSession",
     "make_environment",
     "make_template",
-    "LLMEngine",
     "OpenAIEngine",
 ]

@@ -1,17 +1,30 @@
-from dataclasses import dataclass
-from typing import List, Optional
+"""Shared Pydantic models used by the agent runtime."""
 
-from openai.types.responses import ResponseFunctionToolCallItem
-
-
-# Re-export the canonical OpenAI function-call tool schema for intra-runtime use.
-ToolCall = ResponseFunctionToolCallItem
+from typing import Any, Dict, List, Optional
+from pydantic import BaseModel, Field
 
 
-@dataclass
-class ParsedAssistantMessage:
-    """Structured output from template parsing of an assistant turn."""
+class ToolCall(BaseModel):
+    """One tool call that can be sent to the tool runner."""
+    id: str
+    name: Optional[str] = None
+    arguments: Optional[Dict[str, Any]] = None
+    refusal: Optional[str] = None
 
-    parse_error: bool
-    tool_calls: List[Optional[ToolCall]]
-    final_response: Optional[str]
+
+class ParsedAssistantAction(BaseModel):
+    """Assistant reply split into plain text and tool calls."""
+    content: Optional[str] = None
+    tool_calls: List[ToolCall] = Field(default_factory=list)
+    refusal: Optional[str] = None
+
+
+class ChatMessage(BaseModel):
+    """Single chat turn stored by the conversation memory."""
+    role: str
+    content: Optional[str] = None
+    tool_calls: List[ToolCall] = Field(default_factory=list)
+    reasoning_content: Optional[str] = None  # non-OpenAI field used by vLLM reasoning mode
+
+
+__all__ = ["ToolCall", "ParsedAssistantAction", "ChatMessage"]

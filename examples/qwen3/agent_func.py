@@ -19,7 +19,7 @@ class AgentInstance(AgentInstanceBase):
 
     async def reset(self, states: dict, **kwargs):
         self.step_idx = 0
-        self.session.reset(states.get("observation"))
+        self.session.initialize_prompt(states.get("observation"))
 
         system_prompt = self.session.build_system_prompt()
         observation = system_prompt + states["observation"]

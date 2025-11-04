@@ -1,10 +1,17 @@
+"""Environment orchestration logic used by OpenRLHF agents."""
+
+from __future__ import annotations
+
 import json
-import re
 from abc import ABC, abstractmethod
 from datetime import datetime
-from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
+from typing import Any, Dict, List, Optional, Sequence, Tuple
 
-from .types import ToolCall
+from openrlhf_agent.types import ParsedAssistantAction
+
+
+# ---------------------------------------------------------------------------
+# Tool helpers
 
 
 class ToolBase(ABC):
@@ -12,9 +19,11 @@ class ToolBase(ABC):
 
     name: str
     description: str
-    parameters: List[Dict[str, Any]]
+    parameters: Dict[str, Any]
 
     def openai_tool(self) -> Dict[str, Any]:
+        """Return a schema that matches OpenAI's function tool format."""
+
         return {
             "type": "function",
             "function": {
@@ -25,41 +34,94 @@ class ToolBase(ABC):
         }
 
     @abstractmethod
-    def call(self, context: Dict[str, Any], **kwargs) -> str:
+    def call(self, *, context: Dict[str, Any], arguments: Dict[str, Any]) -> str:
         raise NotImplementedError
 
 
 class ToolRegistry:
+    """Simple name to tool lookup table."""
+
     def __init__(self, tools: Sequence[ToolBase]):
         self._tools: Dict[str, ToolBase] = {tool.name: tool for tool in tools}
 
     def register(self, tool: ToolBase) -> None:
         self._tools[tool.name] = tool
 
-    def names(self) -> Iterable[str]:
+    def names(self) -> List[str]:
         return list(self._tools.keys())
 
     def list_openai_tools(self) -> List[Dict[str, Any]]:
         return [tool.openai_tool() for tool in self._tools.values()]
 
     def get(self, name: str) -> ToolBase:
+        if name not in self._tools:
+            raise KeyError(f"Unknown tool '{name}'.")
         return self._tools[name]
 
 
 class ThinkTool(ToolBase):
+    """Hidden planning tool used to capture private notes."""
+
     name = "think"
     description = "Write down private notes before taking a visible action."
-    parameters = [
-        {
-            "name": "notes",
-            "type": "string",
-            "description": "Short plan or reasoning that stays internal.",
-            "required": True,
-        }
-    ]
+    parameters = {
+        "type": "object",
+        "properties": {
+            "notes": {
+                "type": "string",
+                "description": "Short plan or reasoning that stays internal.",
+            }
+        },
+        "required": ["notes"],
+    }
 
-    def call(self, context: Dict[str, Any], **kwargs) -> str:
-        return kwargs.get("notes", "")
+    def call(self, *, context: Dict[str, Any], arguments: Dict[str, Any]) -> str:
+        return str(arguments.get("notes", ""))
+
+
+# ---------------------------------------------------------------------------
+# Reward helpers
+
+
+def extract_verdict(text: str) -> Optional[str]:
+    """Return [[A]] or [[B]] if found; otherwise None."""
+
+    verdicts = [match for match in ("[[A]]", "[[B]]") if match in text]
+    return verdicts[-1] if verdicts else None
+
+
+def compute_reward(
+    response: str,
+    target: str,
+    *,
+    correct_score: float = 1.0,
+    verdict_score: float = 0.1,
+    miss_score: float = 0.0,
+) -> float:
+    """Score the response against a ground-truth label string."""
+
+    gold = target.strip()
+    if response.strip() == gold:
+        return correct_score
+    if extract_verdict(response) == gold:
+        return verdict_score
+    return miss_score
+
+
+# ---------------------------------------------------------------------------
+# Environment base
+
+
+SYSTEM_PROMPT_TEMPLATE = (
+    "You are a helpful agent assistant.\n\n"
+    "You may call tools to plan privately, but anything outside tool calls is visible to the user.\n\n"
+    "Knowledge cutoff: 2023-06\n"
+    "Current date: {date}\n\n"
+    "Rules:\n"
+    "- Use think(notes=...) when you need to plan internally; its output is hidden from the user.\n"
+    "- To answer the user, provide plain text outside tool calls. That text ends the session.\n"
+    "- Tool calls must be JSON objects within <tool_call></tool_call> tags."
+)
 
 
 class Environment(ABC):
@@ -88,66 +150,46 @@ class Environment(ABC):
         raise NotImplementedError
 
     @abstractmethod
-    def reset(self, observation: Optional[str] = None) -> None:
+    def reset(self, observation: Optional[Sequence[Dict[str, str]]] = None) -> None:
         raise NotImplementedError
 
     @abstractmethod
     def step(
         self,
-        actions: Optional[List[Optional[ToolCall]]],
-        final_response: Optional[str] = None,
+        action: ParsedAssistantAction,
         label: Optional[str] = None,
         runtime: bool = False,
     ) -> Tuple[List[str], float, bool, Optional[str]]:
         raise NotImplementedError
 
 
-SYSTEM_TEMPLATE = """
-You are a helpful agent assistant.
-
-You may call tools to plan privately, but anything outside tool calls is visible to the user.
-
-Knowledge cutoff: 2023-06
-Current date: {date}
-
-Rules:
-- Use think(notes=...) when you need to plan internally; its output is hidden from the user.
-- To answer the user, provide plain text outside of <tool_call> tags. That text will end the task.
-- Each tool call must be enclosed in a <tool_call>{{...}}</tool_call> block containing JSON arguments.
-""".strip()
+# ---------------------------------------------------------------------------
+# Concrete environment
 
 
-def extract_verdict(text: str) -> Optional[str]:
-    """Return '[[A]]' or '[[B]]' if found; otherwise None."""
-    found = re.findall(r"\[\[(A|B)\]\]", text)
-    return f"[[{found[-1]}]]" if found else None
-
-
-def compute_reward(
-    response: str,
-    target: str,
-    *,
-    correct_score: float = 1.0,
-    verdict_correct_score: float = 0.1,
-    format_score: float = 0.0,
-) -> float:
-    if response == target.strip():
-        return correct_score
-    if extract_verdict(response) == target.strip():
-        return verdict_correct_score
-    return format_score
-
-
-class ReActEnvironment(Environment):
+class FunctionCallEnvironment(Environment):
     """Default environment with a private think tool and plain-text finals."""
 
-    def __init__(self, *, max_steps: int = 66):
+    def __init__(
+        self,
+        *,
+        max_steps: int = 32,
+        reward_config: Optional[Dict[str, float]] = None,
+    ) -> None:
         self.registry = ToolRegistry([ThinkTool()])
-        self._init_observation: Optional[str] = None
         self._max_steps = max_steps
-        self._step_idx = 0
+        self._step_index = 0
+        self._initial_messages: Optional[Sequence[Dict[str, str]]] = None
 
-    # ------------------------------------------------------------------ proxy
+        self._reward_config = {
+            "correct_score": 1.0,
+            "verdict_score": 0.1,
+            "miss_score": 0.0,
+        }
+        if reward_config:
+            self._reward_config.update(reward_config)
+
+    # ------------------------------------------------------------------ props
 
     @property
     def max_steps(self) -> int:
@@ -155,59 +197,55 @@ class ReActEnvironment(Environment):
 
     @property
     def system_prompt(self) -> str:
-        current_date = datetime.now().strftime("%Y-%m-%d")
-        return SYSTEM_TEMPLATE.format(date=current_date)
+        return SYSTEM_PROMPT_TEMPLATE.format(date=datetime.now().strftime("%Y-%m-%d"))
+
+    # ----------------------------------------------------------------- tooling
 
     def tools_manifest(self) -> List[Dict[str, Any]]:
         return self.registry.list_openai_tools()
 
     def execute_tool(self, name: str, args: Dict[str, Any], context: Dict[str, Any]) -> str:
         tool = self.registry.get(name)
-        out = tool.call(context=context, **(args or {}))
-        return str(out)
+        return tool.call(context=context, arguments=args)
 
-    # -------------------------------------------------------------- lifecycle
+    # ---------------------------------------------------------------- lifecycle
 
-    def reset(self, observation: Optional[str] = None) -> None:
-        self._step_idx = 0
-        self._init_observation = observation
+    def reset(self, observation: Optional[Sequence[Dict[str, str]]] = None) -> None:
+        self._step_index = 0
+        self._initial_messages = observation
 
     def reward_hook(self, tool_name: str, tool_args: Dict[str, Any], label: Optional[str]) -> float:
         if label is None:
             return 0.0
-        if tool_name == "think":
+        if tool_name != "final":
             return 0.0
-        if tool_name == "final":
-            pred = (tool_args.get("answer") or "").strip()
-            return compute_reward(pred, label)
-        return 0.0
 
-    # --------------------------------------------------------------- stepping
+        answer = str(tool_args.get("answer", "")).strip()
+        if not answer:
+            return 0.0
+        return compute_reward(answer, label, **self._reward_config)
 
-    def _internal_obs(
+    # ----------------------------------------------------------------- helpers
+
+    def _internal_message(
         self,
+        *,
         code: str,
         message: str,
-        *,
         hint: Optional[str] = None,
         tool: Optional[str] = None,
         extras: Optional[Dict[str, Any]] = None,
     ) -> str:
         payload: Dict[str, Any] = {
             "__internal": True,
-            "ok": False,
             "visible_to_user": False,
+            "ok": False,
             "error": {"code": code, "message": message},
             "policy": {
                 "planning_requires_tools": True,
                 "final_response_must_be_plain_text": True,
             },
-            "next_action_suggestion": {
-                "name": "think",
-                "arguments_schema": {"notes": "string"},
-                "why": "Call think(notes=...) to plan, then finish with plain-text responses when ready to finalize.",
-            },
-            "allowed_tools": list(self.registry.names()),
+            "allowed_tools": self.registry.names(),
         }
         if hint:
             payload["hint"] = hint
@@ -217,166 +255,158 @@ class ReActEnvironment(Environment):
             payload.update(extras)
         return json.dumps(payload, ensure_ascii=False)
 
+    # ------------------------------------------------------------------- steps
+
     def step(
         self,
-        actions: Optional[List[Optional[ToolCall]]],
-        final_response: Optional[str] = None,
+        action: ParsedAssistantAction,
         label: Optional[str] = None,
         runtime: bool = False,
     ) -> Tuple[List[str], float, bool, Optional[str]]:
-        if actions is None:
-            obs = self._internal_obs(
-                code="no_tool_call",
-                message="No tool call captured and no final response provided.",
-                hint="Wrap tool calls in <tool_call> tags or reply with plain text for the final answer.",
+        observations: List[str] = []
+        reward = 0.0
+        terminated = False
+        final_response: Optional[str] = None
+
+        if action.refusal:
+            observations.append(
+                self._internal_message(
+                    code="parse_error",
+                    message=action.refusal,
+                    hint="Wrap tool calls in <tool_call> tags or reply with plain text only.",
+                )
             )
-            return [obs], 0.0, False, None
+            self._step_index += 1
+            return observations, reward, terminated, final_response
+
+        if not action.tool_calls:
+            response = (action.content or "").strip()
+            if not response:
+                observations.append(
+                    self._internal_message(
+                        code="empty_final",
+                        message="Final response cannot be empty when no tool calls are provided.",
+                        hint="Reply with plain text to finish or call think(...) first.",
+                    )
+                )
+                self._step_index += 1
+                return observations, reward, terminated, None
+
+            final_response = response
+            terminated = True
+            if not runtime:
+                reward += self.reward_hook("final", {"answer": final_response}, label)
+            self._step_index += 1
+            return observations, reward, terminated, final_response
 
         allowed_tools = set(self.registry.names())
-        next_observations: List[str] = []
-        total_reward = 0.0
-        terminated = False
-        final_payload: Optional[str] = None
 
-        for idx, action in enumerate(actions):
-            if terminated:
-                next_observations.append(
-                    self._internal_obs(
-                        code="ignored_after_final",
-                        message=f"Action #{idx} ignored because a final response has already been provided.",
-                        extras={"action_index": idx, "allowed_tools": list(allowed_tools)},
+        for index, tool_call in enumerate(action.tool_calls):
+            if tool_call is None:
+                continue
+
+            if tool_call.refusal:
+                observations.append(
+                    self._internal_message(
+                        code="tool_call_error",
+                        message=tool_call.refusal,
+                        hint="Fix the tool call JSON payload and try again.",
+                        extras={"tool_call_id": tool_call.id, "action_index": index},
                     )
                 )
                 continue
 
-            if action is None:
-                next_observations.append(
-                    self._internal_obs(
-                        code="invalid_action_format",
-                        message=f"Action #{idx} is missing a valid tool name.",
-                        hint='Use <tool_call>{"name": "...", "arguments": {...}}</tool_call>.',
-                        extras={"action_index": idx},
-                    )
-                )
-                continue
-
-            name = action.name
-            raw_arguments = action.arguments or "{}"
-            try:
-                args = json.loads(raw_arguments)
-            except Exception:
-                next_observations.append(
-                    self._internal_obs(
-                        code="invalid_arguments_json",
-                        message="Tool arguments must be valid JSON.",
-                        tool=name,
-                        hint="Ensure the value inside <tool_call> is JSON-formatted.",
-                        extras={"arguments": raw_arguments, "action_index": idx},
-                    )
-                )
-                continue
-
-            if not isinstance(args, dict):
-                next_observations.append(
-                    self._internal_obs(
-                        code="invalid_arguments_schema",
-                        message="Tool arguments must be a JSON object.",
-                        tool=name,
-                        hint="Use key/value pairs for arguments.",
-                        extras={"arguments": args, "action_index": idx},
+            name = (tool_call.name or "").strip()
+            if not name:
+                observations.append(
+                    self._internal_message(
+                        code="missing_tool_name",
+                        message="Tool name is required.",
+                        hint="Provide a function name inside the tool call payload.",
+                        extras={"tool_call_id": tool_call.id, "action_index": index},
                     )
                 )
                 continue
 
             if name not in allowed_tools:
-                next_observations.append(
-                    self._internal_obs(
-                        code="invalid_action",
-                        message=f"Tool '{name}' is not allowed.",
-                        tool=name,
-                        hint="Use only tools listed in 'allowed_tools'.",
-                        extras={"action_index": idx},
+                observations.append(
+                    self._internal_message(
+                        code="invalid_tool",
+                        message=f"Tool '{name}' is not available.",
+                        hint="Choose one of the allowed tools.",
+                        extras={"tool_call_id": tool_call.id, "action_index": index},
                     )
                 )
                 continue
 
-            tool = self.registry.get(name)
-            required = [p["name"] for p in tool.parameters if p.get("required")]
-            missing = [
-                param
-                for param in required
-                if (param not in args)
-                or (args[param] is None)
-                or (isinstance(args[param], str) and args[param].strip() == "")
-            ]
-            if missing:
-                next_observations.append(
-                    self._internal_obs(
+            arguments = tool_call.arguments or {}
+            if not isinstance(arguments, dict):
+                observations.append(
+                    self._internal_message(
                         code="invalid_arguments",
-                        message=f"Missing required arguments: {missing}",
+                        message="Tool arguments must be a JSON object.",
                         tool=name,
-                        hint="Fill all required fields and try again.",
+                        hint="Use key/value pairs when building tool arguments.",
                         extras={
-                            "required": required,
-                            "received_keys": list(args.keys()),
-                            "action_index": idx,
+                            "tool_call_id": tool_call.id,
+                            "action_index": index,
+                            "arguments": arguments,
                         },
                     )
                 )
                 continue
 
+            context = {
+                "step_index": self._step_index,
+                "action_index": index,
+                "initial_messages": self._initial_messages,
+            }
+
             try:
-                context = {"tool_call_id": action.id, "call_id": action.call_id}
-                obs_text = self.execute_tool(name=name, args=args, context=context)
-            except Exception as exc:  # pragma: no cover - defensive
-                next_observations.append(
-                    self._internal_obs(
+                outcome = self.execute_tool(name=name, args=arguments, context=context)
+            except Exception as exc:  # pragma: no cover - defensive guard
+                observations.append(
+                    self._internal_message(
                         code="tool_runtime_error",
                         message=f"Tool '{name}' raised an exception.",
                         tool=name,
-                        hint="Revise inputs or plan with think(...) before retrying.",
-                        extras={"exception": str(exc), "action_index": idx},
+                        hint="Revise the arguments or plan with think(...) before retrying.",
+                        extras={
+                            "tool_call_id": tool_call.id,
+                            "action_index": index,
+                            "exception": str(exc),
+                        },
                     )
                 )
                 continue
 
-            if name == "think":
-                next_observations.append(
-                    self._internal_obs(
+            if name == ThinkTool.name:
+                observations.append(
+                    self._internal_message(
                         code="think_notes",
                         message="Captured private notes via think().",
-                        extras={
-                            "notes": obs_text,
-                            "action_index": idx,
-                        },
+                        tool=name,
+                        extras={"notes": outcome, "action_index": index},
                     )
                 )
             else:
-                next_observations.append(obs_text)
+                observations.append(str(outcome))
 
             if not runtime:
-                total_reward += self.reward_hook(name, args, label)
+                reward += self.reward_hook(name, arguments, label)
 
-        if final_response is not None:
-            final_payload = final_response.strip()
-            if final_payload:
-                terminated = True
-                if not runtime:
-                    total_reward += self.reward_hook("final", {"answer": final_payload}, label)
-            else:
-                final_payload = None
+        self._step_index += 1
 
-        self._step_idx += 1
-        if self._step_idx >= self.max_steps:
+        if self._step_index >= self.max_steps:
             terminated = True
 
-        return next_observations, total_reward, terminated, final_payload
+        return observations, reward, terminated, final_response
 
 
 def make_environment(name: Optional[str] = None, **kwargs: Any) -> Environment:
-    if name in (None, "", "default"):
-        return ReActEnvironment(**kwargs)
+    if name in (None, "default"):
+        return FunctionCallEnvironment(**kwargs)
     raise ValueError(f"Unknown environment '{name}'.")
 
 
-__all__ = ["Environment", "ReActEnvironment", "make_environment"]
+__all__ = ["Environment", "FunctionCallEnvironment", "make_environment"]
