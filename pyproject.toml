@@ -1,31 +1,14 @@
 [project]
 name = "openrlhf-agent"
 version = "0.0.1"
-description = "Training–inference consistent Agent SDK for OpenRLHF & vLLM."
-readme = {file = "README.md", content-type = "text/markdown"}
+description = "Minimal agent runtime primitives for OpenRLHF workflows."
+readme = "README.md"
 requires-python = ">=3.10"
 license = {text = "Apache-2.0"}
 authors = [{name = "freder"}]
-keywords = ["reinforcement learning", "agent", "openrlhf"]
-classifiers = [
-  "Development Status :: 4 - Beta",
-  "Intended Audience :: Developers",
-  "Intended Audience :: Science/Research",
-  "License :: OSI Approved :: Apache Software License",
-  "Operating System :: OS Independent",
-  "Programming Language :: Python :: 3",
-  "Programming Language :: Python :: 3.10",
-  "Programming Language :: Python :: 3.11",
-  "Programming Language :: Python :: 3.12",
-  "Topic :: Scientific/Engineering :: Artificial Intelligence",
-  "Topic :: Software Development :: Libraries :: Python Modules",
-  "Environment :: GPU :: NVIDIA CUDA",
-  "Topic :: System :: Distributed Computing",
-]
 dependencies = [
   "httpx>=0.27",
   "openai>=1.40",
-  "pyyaml>=6.0",
 ]
 
 [project.optional-dependencies]
@@ -35,16 +18,13 @@ dev = [
   "ruff>=0.5",
   "mypy>=1.10",
 ]
+openrlhf = [
+  "openrlhf>=0.9",
+]
 
 [build-system]
-requires = ["setuptools>=68", "wheel"]
+requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
-
-[tool.setuptools]
-package-dir = {"" = "src"}
-include-package-data = true
-zip-safe = false
 
 [tool.setuptools.packages.find]
 where = ["src"]
-exclude = ["tests", "docs", "examples"]

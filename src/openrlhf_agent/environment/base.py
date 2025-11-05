@@ -1,37 +1,47 @@
-from typing import Any, Dict, List, Optional, Tuple
-from abc import ABC, abstractmethod
+"""Shared interfaces for agent environments."""
 
-from openrlhf_agent.utils.types import ToolResult, ToolCall
+from __future__ import annotations
+
+from abc import ABC, abstractmethod
+from typing import Any, Dict, List, Optional, Tuple
+
+from openrlhf_agent.core import ParsedAssistantAction, ToolCall
 
 
 class Environment(ABC):
+    """Abstract interface for agent environments."""
+
+    @property
+    @abstractmethod
+    def max_steps(self) -> int:
+        raise NotImplementedError
+
     @property
     @abstractmethod
     def system_prompt(self) -> str:
-        """Return a system prompt string for the agent."""
         raise NotImplementedError
 
     @abstractmethod
     def tools_manifest(self) -> List[Dict[str, Any]]:
-        """Return a list of tool specifications (OpenAI compatible)."""
         raise NotImplementedError
 
     @abstractmethod
-    def execute_tool(self, name: str, args: Dict[str, Any], context: Dict[str, Any] = {}) -> ToolResult:
-        """Execute the tool by name with arguments and optional context."""
+    def execute_tool(self, call: ToolCall, context: Dict[str, Any]) -> str:
         raise NotImplementedError
 
     @abstractmethod
-    def reward_hook(self, event: Dict[str, Any]) -> float:
-        """Compute reward given an event emitted during interaction."""
+    def reward_hook(self, action: ParsedAssistantAction, label: Optional[str]) -> float:
         raise NotImplementedError
 
     @abstractmethod
-    def reset(self) -> None:
-        """Reset any internal state before a new episode."""
+    def reset_step(self) -> None:
         raise NotImplementedError
 
     @abstractmethod
-    def step(self, actions: List[ToolCall], label: Optional[str] = None, runtime: bool = False) -> Tuple[str, float, bool]:
-        """Apply actions and return (next_observation, reward, terminated)."""
+    def step(
+        self,
+        action: ParsedAssistantAction,
+        label: Optional[str] = None,
+        runtime: bool = False,
+    ) -> Tuple[List[str], float, bool, Optional[str]]:
         raise NotImplementedError

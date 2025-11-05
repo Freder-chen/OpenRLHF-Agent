@@ -1,13 +1,19 @@
+"""OpenAI-compatible engine implementation."""
+
+from __future__ import annotations
+
 import os
+from typing import List, Optional, Tuple, Union
+
 import httpx
-
 from openai import OpenAI
-from typing import List, Optional, Union, Tuple
 
-from .base import LLMEngine
+from openrlhf_agent.engine.base import LLMEngine
 
 
 class OpenAIEngine(LLMEngine):
+    """Thin wrapper that talks to an OpenAI-style completions endpoint."""
+
     def __init__(
         self,
         model: Optional[str] = None,
@@ -23,9 +29,9 @@ class OpenAIEngine(LLMEngine):
         )
         self.model = model or os.getenv("OPENAI_MODEL")
 
-        # A temporary client for tokenization
+        # Separate client needed for tokenization route.
         self.tmp_client = OpenAI(
-            base_url='/'.join(self.base_url.split('/')[:-1]),
+            base_url="/".join(self.base_url.split("/")[:-1]),
             api_key=self.api_key,
         )
 
@@ -44,12 +50,12 @@ class OpenAIEngine(LLMEngine):
             stream=stream,
             extra_body={
                 "return_token_ids": True,
-            }
+            },
         )
         token_ids = response.choices[0].token_ids
         text = response.choices[0].text
         return token_ids, text
-    
+
     def tokenize(self, prompt: str) -> List[int]:
         response = self.tmp_client.post(
             "/tokenize",
@@ -63,3 +69,4 @@ class OpenAIEngine(LLMEngine):
         return response["tokens"]
 
 
+__all__ = ["OpenAIEngine"]
