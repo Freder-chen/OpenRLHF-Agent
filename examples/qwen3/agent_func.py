@@ -13,13 +13,11 @@ logger.setLevel(logging.INFO)
 class AgentInstance(AgentInstanceBase):
     async def __init__(self, *args, **kwargs):
         environment = make_environment(name="default")
-        protocol = make_chat_protocol("qwen3")
+        protocol = make_chat_protocol("qwen3_instruct")
         self.session = AgentSession(environment, protocol)
 
     async def reset(self, states: dict, **kwargs):
-        # TODO: states.get("observation") transfer to messages
-        messages = states.get("messages")
-        prompt = self.session.initialize(messages)
+        prompt = self.session.initialize(states.get("observation"))
         return {"observation": prompt}
 
     async def step(self, states: dict, **kwargs) -> Dict[str, Any]:

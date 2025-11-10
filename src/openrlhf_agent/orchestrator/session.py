@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any, Dict, Optional, Sequence
+from typing import Any, Dict, Optional, Sequence, Union
 
 from openrlhf_agent.chat_protocol import ChatProtocol
 from openrlhf_agent.core import AgentStepResult, ChatMessage, ParsedAssistantAction
@@ -28,12 +28,23 @@ class AgentSession:
 
     # ---------------------------------------------------------------- lifecycle
 
-    def initialize(self, messages: Sequence[Dict[str, Any]]) -> str:
+    def initialize(
+        self, payload: Optional[Union[Sequence[Dict[str, Any]], str]] = None
+    ) -> str:
         """Reset environment state and return the first prompt."""
 
         self.environment.reset_step()
         self.history.reset(system_prompt=self.environment.system_prompt)
-        self.history.extend(messages)
+
+        if isinstance(payload, str) and payload.strip():
+            parsed_messages = self.protocol.parse_messages_from_completion_text(payload)
+            # NOTE: skip system message
+            if parsed_messages and parsed_messages[0].role == "system":
+                parsed_messages = parsed_messages[1:]
+            if parsed_messages:
+                self.history.extend(parsed_messages)
+        elif payload:
+            self.history.extend(payload)
 
         return self.history.render_prompt(
             self.protocol,

@@ -3,9 +3,9 @@
 import json
 import re
 from textwrap import dedent
-from typing import ClassVar, List
+from typing import Any, ClassVar, List, Sequence
 
-from openrlhf_agent.core import ParsedAssistantAction, ToolCall
+from openrlhf_agent.core import ChatMessage, ParsedAssistantAction, ToolCall
 from openrlhf_agent.chat_protocol.base import ChatProtocol
 
 
@@ -103,6 +103,16 @@ QWEN3_TOOL_CALL_REGEX = re.compile(
     re.DOTALL | re.IGNORECASE,
 )
 
+QWEN3_MESSAGE_BLOCK_REGEX = re.compile(
+    r"<\|im_start\|\>(?P<role>[a-zA-Z_]+)\s*\n(?P<body>.*?)<\|im_end\|\>",
+    re.DOTALL,
+)
+
+QWEN3_TOOL_RESPONSE_REGEX = re.compile(
+    r"<tool_response>\s*(?P<body>.*?)\s*</tool_response>",
+    re.DOTALL | re.IGNORECASE,
+)
+
 
 class Qwen3InstructProtocol(ChatProtocol):
     """Render Qwen3 messages and parse tool call annotations."""
@@ -150,6 +160,42 @@ class Qwen3InstructProtocol(ChatProtocol):
 
         return ToolCall(id=f"call_{idx}", name=name, arguments=arguments)
 
+    def parse_messages_from_completion_text(
+        self,
+        completion_text: str,
+    ) -> List[ChatMessage]:
+        """Decode a rendered prompt and reconstruct the original messages."""
+        messages: List[ChatMessage] = []
+
+        for block in QWEN3_MESSAGE_BLOCK_REGEX.finditer(completion_text or ""):
+            role = block.group("role").strip()
+            body = block.group("body").strip("\n")
+
+            if not body and role != "assistant":
+                continue
+
+            if role == "assistant":
+                parsed = self.parse_assistant_text(body)
+                messages.append(
+                    ChatMessage(
+                        role="assistant",
+                        content=parsed.content,
+                        tool_calls=list(parsed.tool_calls),
+                    )
+                )
+                continue
+
+            if role == "user" and "<tool_response>" in body:
+                for tool_match in QWEN3_TOOL_RESPONSE_REGEX.finditer(body):
+                    payload = tool_match.group("body").strip()
+                    if payload:
+                        messages.append(ChatMessage(role="tool", content=payload))
+                continue
+
+            messages.append(ChatMessage(role=role, content=body.strip()))
+
+        return messages
+
 
 if __name__ == "__main__":
     protocol = Qwen3InstructProtocol()
@@ -171,7 +217,9 @@ if __name__ == "__main__":
             "role": "tool",
             "content": '{"fact": "Olympus Mons is the tallest volcano in the solar system."}',
         },
-        # {"role": "assistant", "content": "Mars has the largest volcano in the solar system, Olympus Mons."},
+        {"role": "assistant", "content": "Mars has the largest volcano in the solar system, Olympus Mons."},
     ]
     rendered = protocol.render_messages(messages=demo_messages, add_generation_prompt=True)
     print(rendered)
+    messages = protocol.parse_messages_from_completion_text(rendered)
+    print(messages)
