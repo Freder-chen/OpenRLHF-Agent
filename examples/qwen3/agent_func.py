@@ -24,19 +24,19 @@ class AgentInstance(AgentInstanceBase):
         action_text: str = states.get("action_text", "")
         label = states.get("label")
 
-        step_result = self.session.step_from_text(action_text, label=label)
+        step_outcome = self.session.step_from_text(action_text, label=label)
 
-        reward = step_result.reward
+        reward = step_outcome.reward
         if reward < -1:
             reward = -1.0
 
-        done = step_result.terminated
-        step_idx = step_result.step_index
+        done = step_outcome.terminated
+        step_idx = step_outcome.step_index
 
         return {
             "rewards": torch.tensor(reward),
             "scores": torch.tensor(reward),
-            "environment_feedback": "" if done else step_result.feedback_text,
+            "environment_feedback": "" if done else step_outcome.feedback_text,
             "done": done,
             "sampling_params": states.get("sampling_params", None),
             "extra_logs": {
