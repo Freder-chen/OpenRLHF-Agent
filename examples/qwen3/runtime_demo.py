@@ -1,4 +1,4 @@
-from openrlhf_agent import AgentRuntime, OpenAIEngine, make_environment, make_template
+from openrlhf_agent import AgentRuntime, OpenAIEngine, make_environment, make_chat_protocol
 
 if __name__ == "__main__":
     engine = OpenAIEngine(
@@ -7,9 +7,9 @@ if __name__ == "__main__":
         api_key="empty",
     )
     env = make_environment(name="default")
-    template = make_template(name="qwen3_instruct")
+    protocol = make_chat_protocol(name="qwen3_instruct")
 
-    rt = AgentRuntime(engine, env, template)
+    rt = AgentRuntime(engine, env, protocol)
     messages = [{"role": "user", "content": "Tell me a joke about programming."}]
     for step in rt.run_steps(messages):
         print(step)

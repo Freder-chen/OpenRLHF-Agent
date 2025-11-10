@@ -4,30 +4,21 @@ from __future__ import annotations
 
 from typing import Any, Dict, Optional, Sequence
 
+from openrlhf_agent.chat_protocol import ChatProtocol
 from openrlhf_agent.core import AgentStepResult, ChatMessage, ParsedAssistantAction
 from openrlhf_agent.environment import Environment
-from openrlhf_agent.template import Template
 from openrlhf_agent.orchestrator.history import ChatHistory
 
 
 class AgentSession:
-    """Maintains chat history and bridges the template with the environment."""
+    """Maintains chat history and bridges the protocol with the environment."""
 
-    def __init__(self, environment: Environment, template: Template) -> None:
+    def __init__(self, environment: Environment, protocol: ChatProtocol) -> None:
         self.environment = environment
-        self.template = template
+        self.protocol = protocol
         self.history = ChatHistory()
 
     # ------------------------------------------------------------------ helpers
-
-    def _coerce_message(self, message: Any) -> ChatMessage:
-        """Turn dictionaries into `ChatMessage` objects when needed."""
-
-        if isinstance(message, ChatMessage):
-            return message
-        if isinstance(message, dict):
-            return ChatMessage(**message)
-        raise TypeError(f"Unsupported message type: {type(message)!r}")
 
     @staticmethod
     def _has_parse_error(action: ParsedAssistantAction) -> bool:
@@ -42,16 +33,10 @@ class AgentSession:
 
         self.environment.reset_step()
         self.history.reset(system_prompt=self.environment.system_prompt)
-        self.history.extend(self._coerce_message(message) for message in messages)
+        self.history.extend(messages)
 
         return self.history.render_prompt(
-            self.template,
-            tools_manifest=self.environment.tools_manifest(),
-        )
-
-    def render_prompt(self) -> str:
-        return self.history.render_prompt(
-            self.template,
+            self.protocol,
             tools_manifest=self.environment.tools_manifest(),
         )
 
@@ -103,7 +88,7 @@ class AgentSession:
     ) -> AgentStepResult:
         """Parse a raw model response and forward to `step`."""
 
-        parsed_action = self.template.parse_assistant_text(action_text)
+        parsed_action = self.protocol.parse_assistant_text(action_text)
         return self.step(
             parsed_action,
             label=label,

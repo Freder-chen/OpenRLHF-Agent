@@ -1,4 +1,4 @@
-"""Qwen3 chat template rendering and parsing helpers."""
+"""Qwen3 chat protocol rendering and parsing helpers."""
 
 import json
 import re
@@ -6,7 +6,7 @@ from textwrap import dedent
 from typing import ClassVar, List
 
 from openrlhf_agent.core import ParsedAssistantAction, ToolCall
-from openrlhf_agent.template.base import Template
+from openrlhf_agent.chat_protocol.base import ChatProtocol
 
 
 # Mirrors the upstream Qwen3 chat formatting rules.
@@ -104,7 +104,7 @@ QWEN3_TOOL_CALL_REGEX = re.compile(
 )
 
 
-class Qwen3InstructTemplate(Template):
+class Qwen3InstructProtocol(ChatProtocol):
     """Render Qwen3 messages and parse tool call annotations."""
 
     chat_template: ClassVar[str] = QWEN3_CHAT_TEMPLATE  # for render_messages
@@ -152,7 +152,7 @@ class Qwen3InstructTemplate(Template):
 
 
 if __name__ == "__main__":
-    template = Qwen3InstructTemplate()
+    protocol = Qwen3InstructProtocol()
     demo_messages = [
         {"role": "system", "content": "You are a concise assistant."},
         {"role": "user", "content": "Give me one interesting fact about Mars."},
@@ -173,5 +173,5 @@ if __name__ == "__main__":
         },
         # {"role": "assistant", "content": "Mars has the largest volcano in the solar system, Olympus Mons."},
     ]
-    rendered = template.render_messages(messages=demo_messages, add_generation_prompt=True)
+    rendered = protocol.render_messages(messages=demo_messages, add_generation_prompt=True)
     print(rendered)

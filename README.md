@@ -2,12 +2,12 @@
 
 > Consistent training and inference stack for building tool-using chat agents on OpenRLHF and vLLM.
 
-OpenRLHF-Agent provides a shared runtime that covers environment orchestration, prompt templates, and model I/O for both RL training and production inference. Teams can prototype an agent policy with OpenRLHF, then ship the same codepath behind a chatbot powered by vLLM or any OpenAI-compatible endpoint.
+OpenRLHF-Agent provides a shared runtime that covers environment orchestration, chat protocols, and model I/O for both RL training and production inference. Teams can prototype an agent policy with OpenRLHF, then ship the same codepath behind a chatbot powered by vLLM or any OpenAI-compatible endpoint.
 
 ## ✨ Highlights
 
 - **Training and inference stay aligned**: the identical `AgentSession` flow drives resets, tool calls, and transcript rendering across phases.
-- **Lean agent primitives**: a minimal set of modules (`AgentRuntime`, `Environment`, `Template`, `LLMEngine`, and shared core models) keeps the runtime easy to audit and extend.
+- **Lean agent primitives**: a minimal set of modules (`AgentRuntime`, `Environment`, `ChatProtocol`, `LLMEngine`, and shared core models) keeps the runtime easy to audit and extend.
 - **Tool-centric design**: bundled `think` helper demonstrates ReAct-style loops while final answers ship as plain assistant text.
 - **Production-ready examples**: Qwen-3 samples cover inference serving, RL data collection, and REINFORCE++ training.
 - **Optimized for OpenRLHF**: plug `AgentRuntime` into `train_reinforce_agent.sh` or Ray jobs without extra glue code.
@@ -25,7 +25,7 @@ Chat assistants are shifting from passive Q&A toward autonomous task execution. 
 ```
 AgentRuntime
  ├─ AgentSession  (shared rollouts for training + inference)
- ├─ Template      (prompt rendering, tool parsing)
+ ├─ ChatProtocol  (prompt rendering, tool parsing)
  ├─ Environment   (state, rewards, tool registry)
  └─ LLMEngine     (token streaming via OpenAI/vLLM/custom)
 ```
@@ -35,7 +35,7 @@ AgentRuntime
 - `src/openrlhf_agent/core/`: shared chat, tool-call, and step-result models.
 - `src/openrlhf_agent/orchestrator/`: runtime loop, `AgentRuntime`, and `AgentSession` orchestration.
 - `src/openrlhf_agent/environment/`: default environment, tool registry, reward hooks, and tool base classes.
-- `src/openrlhf_agent/template/`: prompt builders, `<tool_call>` parsing, and template factory helpers.
+- `src/openrlhf_agent/chat_protocol/`: prompt builders, `<tool_call>` parsing, and protocol factory helpers.
 - `src/openrlhf_agent/engine/`: OpenAI-compatible `LLMEngine` base and the default HTTP client.
 - `examples/qwen3/`: runnable demos for inference and reinforcement learning.
 
@@ -76,7 +76,7 @@ The script wires together:
 
 - `OpenAIEngine` pointing at a vLLM/OpenAI-compatible endpoint.
 - `DefaultEnvironment` with the `think` tool, feedback hooks, and plain-text finals.
-- `make_template("qwen3")` for prompt rendering and `<tool_call>` parsing.
+- `make_chat_protocol("qwen3")` for prompt rendering and `<tool_call>` parsing.
 
 You will see tool traces and the final answer printed to the console.
 
@@ -98,11 +98,11 @@ You will see tool traces and the final answer printed to the console.
 - Extend `step` to orchestrate multiple tool calls or enforce guardrails.
 - Emit hidden hints through `_internal_obs` to steer the policy between turns.
 
-### Ship a new prompt template
+### Ship a new chat protocol
 
-- Subclass `Template` in `template/base.py`.
-- Implement render + parse helpers for your prompt style.
-- Expose it via `make_template` and pass it into `AgentRuntime`.
+- Subclass `ChatProtocol` in `chat_protocol/base.py`.
+- Implement render + parse helpers for your provider format.
+- Expose it via `make_chat_protocol` and pass it into `AgentRuntime`.
 
 ### Support another engine
 

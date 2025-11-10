@@ -2,7 +2,7 @@ import logging
 import torch
 
 from typing import Any, Dict
-from openrlhf_agent import AgentSession, make_environment, make_template
+from openrlhf_agent import AgentSession, make_environment, make_chat_protocol
 from openrlhf.utils.agent import AgentExecutorBase, AgentInstanceBase
 
 logging.basicConfig()
@@ -13,8 +13,8 @@ logger.setLevel(logging.INFO)
 class AgentInstance(AgentInstanceBase):
     async def __init__(self, *args, **kwargs):
         environment = make_environment(name="default")
-        template = make_template("qwen3")
-        self.session = AgentSession(environment, template)
+        protocol = make_chat_protocol("qwen3")
+        self.session = AgentSession(environment, protocol)
 
     async def reset(self, states: dict, **kwargs):
         # TODO: states.get("observation") transfer to messages

@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
-from typing import Any, Dict, Iterable, List, Optional, Sequence
+from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence
 
+from openrlhf_agent.chat_protocol import ChatProtocol
 from openrlhf_agent.core import ChatMessage
-from openrlhf_agent.template import Template
 
 
 class ChatHistory:
@@ -16,16 +16,23 @@ class ChatHistory:
 
     # --------------------------------------------------------------------- setup
 
+    def _coerce_message(self, message: ChatMessage | Mapping[str, Any]) -> ChatMessage:
+        if isinstance(message, ChatMessage):
+            return message
+        if isinstance(message, Mapping):
+            return ChatMessage(**message)
+        raise TypeError(f"Unsupported message type: {type(message)!r}")
+
     def reset(self, *, system_prompt: str) -> None:
         """Start a new history using the latest system prompt."""
 
         self._messages = [ChatMessage(role="system", content=system_prompt)]
 
-    def extend(self, messages: Iterable[ChatMessage]) -> None:
+    def extend(self, messages: Iterable[ChatMessage | Mapping[str, Any]]) -> None:
         """Append a batch of messages in their current order."""
 
         for message in messages:
-            self._messages.append(message)
+            self._messages.append(self._coerce_message(message))
 
     # ------------------------------------------------------------------- mutators
 
@@ -45,7 +52,7 @@ class ChatHistory:
 
     def render_prompt(
         self,
-        template: Template,
+        protocol: ChatProtocol,
         *,
         tools_manifest: Optional[Sequence[Dict[str, Any]]] = None,
         add_generation_prompt: bool = True,
@@ -55,7 +62,7 @@ class ChatHistory:
         message_payload = [
             message.model_dump(exclude_none=True) for message in self._messages
         ]
-        return template.render_messages(
+        return protocol.render_messages(
             messages=message_payload,
             tools_manifest=tools_manifest,
             add_generation_prompt=add_generation_prompt,

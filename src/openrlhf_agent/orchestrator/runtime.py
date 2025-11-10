@@ -4,10 +4,10 @@ from __future__ import annotations
 
 from typing import Any, Dict, Iterable, List, Optional, Sequence
 
+from openrlhf_agent.chat_protocol import ChatProtocol
 from openrlhf_agent.core import AgentStepResult, ChatMessage
 from openrlhf_agent.environment import Environment
 from openrlhf_agent.engine import LLMEngine
-from openrlhf_agent.template import Template
 
 from openrlhf_agent.orchestrator.session import AgentSession
 
@@ -19,14 +19,14 @@ class AgentRuntime:
         self,
         engine: LLMEngine,
         environment: Environment,
-        template: Template,
+        protocol: ChatProtocol,
         *,
         max_new_tokens_per_step: int = 10240,
     ) -> None:
         self.engine = engine
-        self.session = AgentSession(environment, template)
+        self.session = AgentSession(environment, protocol)
         self.environment = self.session.environment
-        self.template = self.session.template
+        self.protocol = self.session.protocol
         self.max_new_tokens_per_step = max_new_tokens_per_step
 
     @staticmethod
@@ -56,12 +56,12 @@ class AgentRuntime:
     def _tool_response_tokens(self, tool_messages: Sequence[ChatMessage]) -> List[int]:
         if not tool_messages:
             # If the environment yields nothing we still need the next assistant prefix.
-            prompt_snippet = self.template.render_messages(
+            prompt_snippet = self.protocol.render_messages(
                 messages=[],
                 add_generation_prompt=True,
             )
         else:
-            prompt_snippet = self.template.render_messages(
+            prompt_snippet = self.protocol.render_messages(
                 messages=[msg.model_dump(exclude_none=True) for msg in tool_messages],
                 add_generation_prompt=True,
             )
@@ -112,4 +112,3 @@ class AgentRuntime:
             content = message.get("content") if isinstance(message, dict) else None
             final_text = content or final_text
         return final_text
-
