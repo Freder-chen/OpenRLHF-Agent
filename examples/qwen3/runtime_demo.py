@@ -8,7 +8,7 @@ from openrlhf_agent.agentkit.factory import build_environment, build_protocol
 async def main() -> None:
     engine = OpenAIEngine(
         model="qwen3",
-        base_url="http://0.0.0.0:8009/v1",
+        base_url="http://localhost:8009/v1",
         api_key="empty",
     )
     env = build_environment(name="function_call")
