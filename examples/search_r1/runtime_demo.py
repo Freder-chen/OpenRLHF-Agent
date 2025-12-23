@@ -43,7 +43,7 @@ async def main() -> None:
     parser.add_argument("--model", default="qwen3")
     parser.add_argument("--base-url", default="http://localhost:8009/v1")
     parser.add_argument("--api-key", default="empty")
-    parser.add_argument("--question", default="Curious is a women’s fragrance by a singer born in what city and state?")
+    parser.add_argument("--question", default="你好，你叫什么名字?")
     parser.add_argument("--ui", action="store_true", default=True, help="Launch web UI (Gradio) instead of console print.")
     parser.add_argument("--port", type=int, default=7867, help="Port for the UI.")
     parser.add_argument("--share", action="store_true", help="Enable Gradio public link.")

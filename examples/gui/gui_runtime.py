@@ -25,9 +25,9 @@ def format_step(step: Dict[str, Any]) -> str:
 
     role = step.get("role")
     if role == "assistant":
-        content = step.get("content", "") or ""
-        reasoning = step.get("reasoning_content", "") or ""
-        tool_calls = step.get("tool_calls") or []
+        content = step.get("content", "") or "" # 最终答案
+        reasoning = step.get("reasoning_content", "") or "" # 思考
+        tool_calls = step.get("tool_calls") or [] # 工具调用
 
         parts: List[str] = []
 
@@ -38,9 +38,10 @@ def format_step(step: Dict[str, Any]) -> str:
 
         # Tool Calls：默认收起
         if tool_calls:
-            tool_body = ", ".join(
-                call.get("name", "") for call in tool_calls if isinstance(call, dict)
-            )
+            # tool_body = ", ".join(
+            #     call.get("name", "") for call in tool_calls if isinstance(call, dict)
+            # )
+            tool_body = tool_calls
             if tool_body:
                 tool_calls_block = make_section("Tool Calls", tool_body, open_default=False)
                 parts.append(tool_calls_block)
@@ -53,7 +54,7 @@ def format_step(step: Dict[str, Any]) -> str:
         # 把所有 section 按顺序拼起来
         return "\n\n".join(parts).strip()
 
-    if role == "tool":
+    if role == "tool": # 工具响应
         payload = step.get("content", "") or ""
         # Tool Result 也做成可折叠，默认收起（你可以根据需要改成 True）
         return (
