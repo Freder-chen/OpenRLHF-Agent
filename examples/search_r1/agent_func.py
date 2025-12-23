@@ -1,13 +1,6 @@
 import logging
 from datetime import datetime
 import torch
-from pathlib import Path
-import sys
-PROJECT_ROOT = Path(__file__).resolve().parents[2]
-for path in (PROJECT_ROOT, PROJECT_ROOT / "src"):
-    if str(path) not in sys.path:
-        sys.path.insert(0, str(path))
-
 from typing import Any, Dict
 
 from openrlhf_agent.agentkit.rewards import RewardPipeline
@@ -19,7 +12,7 @@ from openrlhf_agent.agentkit.factory import (
     build_result_reward,
 )
 from openrlhf_agent.agentkit.tools.hub.commentary import CommentaryTool
-from search_tool import LocalSearchTool
+from examples.search_r1.search_tool import LocalSearchTool
 
 from openrlhf.utils.agent import AgentExecutorBase, AgentInstanceBase
 
@@ -47,20 +40,6 @@ class AgentInstance(AgentInstanceBase):
         )
         protocol = build_protocol(name="qwen3_thinking")
         pipeline = RewardPipeline(
-            process_reward=build_process_reward(
-                name="tool_call",
-                config=dict(
-                    parse_error_penalty=-0.2,
-                    penalty_for_refused=-0.1,
-                    tool_policies={
-                        "commentary": dict(
-                            max_calls=1,
-                            reward_per_call=0.1,
-                            overuse_penalty=-0.1,
-                        ),
-                    },
-                )
-            ),
             result_reward=build_result_reward(
                 name="matching",
                 config=dict(

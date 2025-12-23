@@ -63,8 +63,8 @@ set -x
    --kl_estimator k2 \
    --prompt_data ${DATASET_PATH} \
    --apply_chat_template \
-   --input_key prompt \
-   --label_key target \
+   --input_key question \
+   --label_key golden_answers \
    --normalize_reward \
    --packing_samples \
    --agent_func_path ${AGNET_FUNC_PATH} \

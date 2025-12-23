@@ -1,10 +1,5 @@
-"""Shared Gradio UI helpers for streaming AgentRuntime demos."""
-
-from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional, Tuple
-
+from typing import Any, Dict, List, Optional, Tuple
 import gradio as gr
-
 from openrlhf_agent.agentkit.runtime import AgentRuntime
 
 
@@ -65,19 +60,16 @@ def format_step(step: Dict[str, Any]) -> str:
     return step.get("content", "") or ""
 
 def launch_runtime_ui(
-    *,
-    runtime_builder: Callable[[], AgentRuntime],
+    rt: AgentRuntime,
     tools: list,
     title: str,
     description: str,
     port: int,
-    share: bool,
     open_browser: bool = False,
     default_question: Optional[str] = None,
 ) -> None:
     """Launch a ChatGPT-like Gradio chat UI for an AgentRuntime."""
 
-    rt = runtime_builder()
     async def chat_fn(message: str, history: List[Dict[str, str]]) -> Tuple[List[Dict[str, str]], str]:
         if not message or not message.strip():
             yield history, message
@@ -108,20 +100,7 @@ def launch_runtime_ui(
             yield updated_history, ""
 
     def clear_fn() -> Tuple[List[Dict[str, str]], str]:
-        nonlocal rt
-        rt = runtime_builder()
         return [], (default_question or "")
-
-    css_text: Optional[str] = None
-    for name in ("custom.css", "custom_css.css"):
-        css_path = Path(__file__).resolve().parent / name
-        if not css_path.exists():
-            continue
-        try:
-            css_text = css_path.read_text(encoding="utf-8")
-            break
-        except Exception:
-            css_text = None
 
     with gr.Blocks(title="Search-R1 Chat") as demo:
         with gr.Column(elem_id="layout"):
@@ -158,12 +137,13 @@ def launch_runtime_ui(
         msg.submit(chat_fn, inputs=[msg, chatbot], outputs=[chatbot, msg])
         clear.click(clear_fn, outputs=[chatbot, msg])
 
-    demo.queue()  # Queue mode, supports multiple users
+    # demo.queue()  # Queue mode, supports multiple users
     server_port = port if port and port > 0 else None  # None lets Gradio pick a free port
     demo.launch(
         server_port=server_port,
-        share=share,
         inbrowser=open_browser,
         theme=gr.themes.Soft(primary_hue="green", secondary_hue="gray", neutral_hue="gray"),
-        css=css_text,
+        css="""
+            body, * { font-family: "Times New Roman", SimSun, sans-serif; }
+        """
     )

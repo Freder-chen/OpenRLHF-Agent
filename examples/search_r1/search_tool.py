@@ -105,7 +105,7 @@ if __name__ == "__main__":
 
     parser = argparse.ArgumentParser(description="Test the LocalSearchTool against a retrieval server.")
     parser.add_argument("--base-url", default="http://localhost:8000/retrieve", help="Retriever endpoint.")
-    parser.add_argument("--query", default="百年孤独的作者?", help="Query string to send.")
+    parser.add_argument("--query", default="What's the python?", help="Query string to send.")
     parser.add_argument("--topk", type=int, default=3, help="Number of passages to fetch.")
     parser.add_argument(
         "--no-scores",
