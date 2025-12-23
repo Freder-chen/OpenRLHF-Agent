@@ -12,7 +12,7 @@ def format_step(step: Dict[str, Any]) -> str:
     """Render one message from run_steps into readable text with collapsible sections."""
 
     def make_section(title: str, body: str, open_default: bool = True) -> str:
-        """生成一个折叠块：<details><summary>Title</summary>body</details>"""
+        """Generate a collapsible section: <details><summary>Title</summary>body</details>"""
         if not body:
             return ""
         open_attr = " open" if open_default else ""
@@ -25,38 +25,35 @@ def format_step(step: Dict[str, Any]) -> str:
 
     role = step.get("role")
     if role == "assistant":
-        content = step.get("content", "") or "" # 最终答案
-        reasoning = step.get("reasoning_content", "") or "" # 思考
-        tool_calls = step.get("tool_calls") or [] # 工具调用
+        content = step.get("content", "") or ""  # Final answer
+        reasoning = step.get("reasoning_content", "") or ""  # Thought process
+        tool_calls = step.get("tool_calls") or []  # Tool calls
 
         parts: List[str] = []
 
-        # Thinking：默认展开
+        # Thinking: default to open
         thinking_block = make_section("Thinking", reasoning, open_default=True)
         if thinking_block:
             parts.append(thinking_block)
 
-        # Tool Calls：默认收起
+        # Tool Calls: default to collapsed
         if tool_calls:
-            # tool_body = ", ".join(
-            #     call.get("name", "") for call in tool_calls if isinstance(call, dict)
-            # )
             tool_body = tool_calls
             if tool_body:
                 tool_calls_block = make_section("Tool Calls", tool_body, open_default=False)
                 parts.append(tool_calls_block)
 
-        # Final：默认展开
+        # Final: default to open
         final_block = make_section("Final", content, open_default=True)
         if final_block:
             parts.append(final_block)
 
-        # 把所有 section 按顺序拼起来
+        # Combine all sections in order
         return "\n\n".join(parts).strip()
 
-    if role == "tool": # 工具响应
+    if role == "tool":  # Tool response
         payload = step.get("content", "") or ""
-        # Tool Result 也做成可折叠，默认收起（你可以根据需要改成 True）
+        # Tool result is also collapsible, default to collapsed (you can change it to True if needed)
         return (
             "<details>"
             "<summary><strong>Tool Result</strong></summary>\n\n"
@@ -64,21 +61,8 @@ def format_step(step: Dict[str, Any]) -> str:
             "</details>"
         )
 
-    # 其他角色直接原样输出
+    # Return content as-is for other roles
     return step.get("content", "") or ""
-
-
-
-
-# 终端启动 NO UI
-async def run_console(runtime: AgentRuntime, user_question: str) -> None:
-    """Minimal console runner that prints streaming steps."""
-
-    messages = [{"role": "user", "content": user_question}]
-    async for step in runtime.run_steps(messages):
-        print(step)
-        print("-" * 100)
-
 
 def launch_runtime_ui(
     *,
@@ -152,7 +136,7 @@ def launch_runtime_ui(
             )
             msg = gr.Textbox(
                 show_label=False,
-                placeholder="输入你的问题，按 Enter 发送 / Ask anything...",
+                placeholder="Enter your question and press Enter / Ask anything...",
                 value=default_question or "",
                 lines=1,
                 max_lines=8,
@@ -165,13 +149,13 @@ def launch_runtime_ui(
                 submit = gr.Button("Submit", variant="primary", elem_id="send-btn", scale=1)
                 clear = gr.Button("Reset", variant="secondary", elem_id="reset-btn", scale=1)
 
-            gr.Markdown("工具：本地搜索 + 评论。思考链和工具调用会以分段显示。", elem_id="helper-text")
+            gr.Markdown("Tools: Local Search + Comments. Thinking chain and tool calls will be displayed in segments.", elem_id="helper-text")
 
         submit.click(chat_fn, inputs=[msg, chatbot], outputs=[chatbot, msg])
         msg.submit(chat_fn, inputs=[msg, chatbot], outputs=[chatbot, msg])
         clear.click(clear_fn, outputs=[chatbot, msg])
 
-    demo.queue() # 队列模式，支持多用户
+    demo.queue()  # Queue mode, supports multiple users
     server_port = port if port and port > 0 else None  # None lets Gradio pick a free port
     demo.launch(
         server_port=server_port,

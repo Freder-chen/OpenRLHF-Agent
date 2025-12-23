@@ -13,14 +13,17 @@ from openrlhf_agent.backends import OpenAIEngine
 from openrlhf_agent.agentkit.factory import build_environment, build_protocol
 from openrlhf_agent.agentkit.runtime import AgentRuntime
 from openrlhf_agent.agentkit.tools.hub.commentary import CommentaryTool
-from examples.gui import launch_runtime_ui, run_console
+from examples.gui import launch_runtime_ui
 from search_tool import LocalSearchTool
 
 
 CUSTOM_SYSTEM_PROMPT = """
-Answer the given question. First, think step by step inside <think> and </think> whenever you receive new information. After reasoning, decide whether to use tools. Use tools to verify specific aspects of your reasoning or to fetch missing knowledge; do not rely on tools to write the final answer. Call the commentary tool only for brief progress updates.
+Answer the given question. First, think step by step inside <think> and </think> whenever you receive new information. 
+After reasoning, decide whether to use tools. Use tools to verify specific aspects of your reasoning or to fetch missing knowledge; 
+do not rely on tools to write the final answer. Call the commentary tool only for brief progress updates.
 
-If the conditions for solving the problem have been met, directly provide the final answer inside <answer> and </answer> without extra illustrations. Example: <answer> ... </answer>.
+If the conditions for solving the problem have been met, directly provide the final answer inside <answer> and </answer> without extra illustrations. 
+Example: <answer> ... </answer>.
 
 Knowledge cutoff: 2023-06
 Current date: {date}
@@ -43,7 +46,7 @@ async def main() -> None:
     parser.add_argument("--model", default="qwen3")
     parser.add_argument("--base-url", default="http://localhost:8009/v1")
     parser.add_argument("--api-key", default="empty")
-    parser.add_argument("--question", default="你好，你叫什么名字?")
+    parser.add_argument("--question", default="Hello, what's your name? Please use the commentary function to share your thoughts, and also help me search what Python is?")
     parser.add_argument("--ui", action="store_true", default=True, help="Launch web UI (Gradio) instead of console print.")
     parser.add_argument("--port", type=int, default=7867, help="Port for the UI.")
     parser.add_argument("--share", action="store_true", help="Enable Gradio public link.")
@@ -62,8 +65,10 @@ async def main() -> None:
         )
     else:
         runtime = build_runtime(model=args.model, base_url=args.base_url, api_key=args.api_key)
-        await run_console(runtime, args.question)
-
+        messages = [{"role": "user", "content": args.question}]
+        async for step in runtime.run_steps(messages):
+            print(step)
+            print("-" * 100)    
 
 if __name__ == "__main__":
     asyncio.run(main())
