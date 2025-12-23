@@ -67,6 +67,7 @@ def format_step(step: Dict[str, Any]) -> str:
 def launch_runtime_ui(
     *,
     runtime_builder: Callable[[], AgentRuntime],
+    tools: list,
     title: str,
     description: str,
     port: int,
@@ -76,12 +77,12 @@ def launch_runtime_ui(
 ) -> None:
     """Launch a ChatGPT-like Gradio chat UI for an AgentRuntime."""
 
+    rt = runtime_builder()
     async def chat_fn(message: str, history: List[Dict[str, str]]) -> Tuple[List[Dict[str, str]], str]:
         if not message or not message.strip():
             yield history, message
             return
 
-        rt = runtime_builder()
         updated_history: List[Dict[str, str]] = list(history or [])
         updated_history.extend(
             [
@@ -107,6 +108,8 @@ def launch_runtime_ui(
             yield updated_history, ""
 
     def clear_fn() -> Tuple[List[Dict[str, str]], str]:
+        nonlocal rt
+        rt = runtime_builder()
         return [], (default_question or "")
 
     css_text: Optional[str] = None
@@ -149,7 +152,7 @@ def launch_runtime_ui(
                 submit = gr.Button("Submit", variant="primary", elem_id="send-btn", scale=1)
                 clear = gr.Button("Reset", variant="secondary", elem_id="reset-btn", scale=1)
 
-            gr.Markdown("Tools: Local Search + Comments. Thinking chain and tool calls will be displayed in segments.", elem_id="helper-text")
+            gr.Markdown("Available Tools: " + " + ".join(t.name for t in tools), elem_id="helper-text")
 
         submit.click(chat_fn, inputs=[msg, chatbot], outputs=[chatbot, msg])
         msg.submit(chat_fn, inputs=[msg, chatbot], outputs=[chatbot, msg])
