@@ -8,11 +8,9 @@ from openrlhf_agent.agentkit.session import AgentSession
 from openrlhf_agent.agentkit.factory import (
     build_environment,
     build_protocol,
-    build_process_reward,
     build_result_reward,
 )
-from openrlhf_agent.agentkit.tools.hub.commentary import CommentaryTool
-from examples.search_r1.search_tool import LocalSearchTool
+from openrlhf_agent.agentkit.tools import CommentaryTool, LocalSearchTool
 
 from openrlhf.utils.agent import AgentExecutorBase, AgentInstanceBase
 
@@ -22,13 +20,16 @@ logger.setLevel(logging.INFO)
 
 
 CUSTOM_SYSTEM_PROMPT = """
-Answer the given question. First, think step by step inside <think> and </think> whenever you receive new information. After reasoning, decide whether to use tools. Use tools to verify specific aspects of your reasoning or to fetch missing knowledge; do not rely on tools to write the final answer. Call the commentary tool only for brief progress updates.
+Answer the given question. First, think step by step inside <think> and </think> whenever you receive new information. 
+After reasoning, decide whether to use tools. Use tools to verify specific aspects of your reasoning or to fetch missing knowledge; 
+do not rely on tools to write the final answer. Call the commentary tool only for brief progress updates.
 
-If the conditions for solving the problem have been met, directly provide the final answer inside <answer> and </answer> without extra illustrations. Example: <answer> ... </answer>.
+If the conditions for solving the problem have been met, directly provide the final answer inside <final> and </final> without extra illustrations. 
+Example: <final> ... </final>.
 
 Knowledge cutoff: 2023-06
 Current date: {date}
-""".strip().format(date=datetime.now().strftime("%Y-%m-%d"))
+""".strip()
 
 
 class AgentInstance(AgentInstanceBase):
@@ -36,7 +37,7 @@ class AgentInstance(AgentInstanceBase):
         environment = build_environment(
             name="function_call",
             tools=[CommentaryTool(), LocalSearchTool()],
-            system_prompt=CUSTOM_SYSTEM_PROMPT,
+            system_prompt=CUSTOM_SYSTEM_PROMPT.format(date=datetime.now().strftime("%Y-%m-%d")),
         )
         protocol = build_protocol(name="qwen3_thinking")
         pipeline = RewardPipeline(

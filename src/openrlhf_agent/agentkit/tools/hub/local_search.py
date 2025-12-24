@@ -1,10 +1,9 @@
 """Search tool that calls a local retrieval server and formats passages."""
 
-import asyncio
+from __future__ import annotations
+
 import json
 from typing import Any, Dict, List
-
-import httpx
 
 from openrlhf_agent.agentkit.tools import ToolBase
 
@@ -13,34 +12,18 @@ class LocalSearchTool(ToolBase):
     """Calls a local Search-R1 style retriever and returns formatted passages."""
 
     name = "local_search"
-    description = (
-        "Retrieve supporting passages from a local search backend. "
-        "Use this to gather references before drafting the answer."
-    )
+    description = "Retrieve supporting passages from a local search backend. Use this to gather references before drafting the answer."
     parameters: Dict[str, Any] = {
         "type": "object",
         "properties": {
-            "query": {
-                "type": "string",
-                "description": "User query to send to the retriever.",
-            },
-            "topk": {
-                "type": "integer",
-                "description": "How many passages to return.",
-                "minimum": 1,
-                "maximum": 10,
-                "default": 3,
-            },
-            "return_scores": {
-                "type": "boolean",
-                "description": "Whether to include similarity scores.",
-                "default": True,
-            },
+            "query": {"type": "string", "description": "User query to send to the retriever."},
+            "topk": {"type": "integer", "description": "How many passages to return.", "minimum": 1, "maximum": 10, "default": 3},
+            "return_scores": {"type": "boolean", "description": "Whether to include similarity scores.", "default": True},
         },
         "required": ["query"],
     }
 
-    def __init__(self, *, base_url: str = "http://localhost:8000/retrieve", timeout: float = 10.0):
+    def __init__(self, *, base_url: str, timeout: float = 10.0):
         self.base_url = base_url
         self.timeout = timeout
 
@@ -69,6 +52,8 @@ class LocalSearchTool(ToolBase):
         return "\n".join(formatted)
 
     async def call(self, *, context: Dict[str, Any], arguments: Dict[str, Any]) -> str:
+        import httpx
+
         query = str(arguments.get("query", "")).strip()
         if not query:
             return json.dumps({"ok": False, "error": "query is required"})
@@ -95,33 +80,3 @@ class LocalSearchTool(ToolBase):
         formatted = self._passages_to_string(first_query_results)
 
         return json.dumps({"ok": True, "references": formatted}, ensure_ascii=False)
-
-
-__all__ = ["LocalSearchTool"]
-
-
-if __name__ == "__main__":
-    import argparse
-
-    parser = argparse.ArgumentParser(description="Test the LocalSearchTool against a retrieval server.")
-    parser.add_argument("--base-url", default="http://localhost:8000/retrieve", help="Retriever endpoint.")
-    parser.add_argument("--query", default="What's the python?", help="Query string to send.")
-    parser.add_argument("--topk", type=int, default=3, help="Number of passages to fetch.")
-    parser.add_argument(
-        "--no-scores",
-        action="store_true",
-        help="Skip similarity scores in the request (return_scores=False).",
-    )
-    args = parser.parse_args()
-
-    async def _run() -> None:
-        tool = LocalSearchTool(base_url=args.base_url)
-        payload = {
-            "query": args.query,
-            "topk": args.topk,
-            "return_scores": not args.no_scores,
-        }
-        result = await tool.call(context={}, arguments=payload)
-        print(result)
-
-    asyncio.run(_run())

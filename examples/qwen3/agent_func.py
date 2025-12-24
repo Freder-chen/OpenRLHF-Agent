@@ -1,4 +1,3 @@
-import logging
 import torch
 
 from typing import Any, Dict
@@ -13,10 +12,6 @@ from openrlhf_agent.agentkit.factory import (
 )
 
 from openrlhf.utils.agent import AgentExecutorBase, AgentInstanceBase
-
-logging.basicConfig()
-logger = logging.getLogger(__name__)
-logger.setLevel(logging.INFO)
 
 
 class AgentInstance(AgentInstanceBase):
