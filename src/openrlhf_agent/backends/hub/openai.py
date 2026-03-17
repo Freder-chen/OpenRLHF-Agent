@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import os
-from typing import List, Optional, Tuple, Union
+from typing import Dict, List, Optional, Sequence, Tuple, Union
 
 import httpx
 from openai import AsyncOpenAI
@@ -51,14 +51,12 @@ class OpenAIEngine(LLMEngine):
         prompt: Optional[Union[str, List[int]]],
         max_tokens: int = 10240,
         temperature: float = 0.6,
-        stream: bool = False,
     ) -> Tuple[List[int], str]:
         response = await self.client.completions.create(
             model=self.model,
             prompt=prompt,
             max_tokens=max_tokens,
             temperature=temperature,
-            stream=stream,
             extra_body={
                 "return_token_ids": True,
             },
@@ -66,6 +64,22 @@ class OpenAIEngine(LLMEngine):
         token_ids = response.choices[0].token_ids
         text = response.choices[0].text
         return token_ids, text
+
+    async def chat(
+        self,
+        messages: Sequence[Dict[str, str]],
+        max_tokens: int = 10240,
+        temperature: float = 0.6,
+    ) -> str:
+        response = await self.client.chat.completions.create(
+            model=self.model,
+            messages=list(messages),
+            max_tokens=max_tokens,
+            temperature=temperature,
+        )
+        message = response.choices[0].message
+        text = message.content or ""
+        return text if isinstance(text, str) else str(text)
 
     async def tokenize(self, prompt: str) -> List[int]:
         if self._token_client is None:
