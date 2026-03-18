@@ -12,7 +12,7 @@ export VLLM_WORKER_MULTIPROC_METHOD=spawn
 export TORCH_NCCL_ENABLE_MONITORING=0
 export NCCL_SOCKET_TIMEOUT=1800000
 
-MODEL_PATH="Qwen/Qwen3-4B-Instruct-2507"
+MODEL_PATH="Qwen/Qwen3-4B-Thinking-2507"
 SAVE_PATH="${WORK_DIR}/exp/Qwen3-test"
 AGENT_FUNC_PATH="${SCRIPT_DIR}/agent_func.py"
 DATASET_PATH="{your_dataset_path_here}" # TODO: set your dataset path here
@@ -54,7 +54,6 @@ ray job submit --address="http://127.0.0.1:8265" \
    --ring_attn_size 2 \
    --ring_head_stride 2 \
    --gradient_checkpointing \
-   --bf16 \
    --advantage_estimator reinforce_baseline \
    --actor_learning_rate 5e-7 \
    --entropy_loss_coef 0.00 \
