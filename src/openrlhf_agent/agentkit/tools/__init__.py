@@ -1,15 +1,16 @@
 """Tool abstractions plus built-in providers."""
 
 from .base import ToolBase
-from .hub.commentary import CommentaryTool
-from .hub.final import FinalTool
-from .hub.local_search import LocalSearchTool
-from .hub.think import ThinkTool
+from .hub.control import CommentaryTool, FinalTool, ThinkTool
+from .hub.jina import JinaReadTool, JinaSearchTool
+from .hub.wiki_search import WikiSearchTool
 
 __all__ = [
     "ToolBase",
     "CommentaryTool",
     "FinalTool",
-    "LocalSearchTool",
+    "JinaSearchTool",
+    "JinaReadTool",
+    "WikiSearchTool",
     "ThinkTool",
 ]

@@ -3,14 +3,13 @@ from typing import Any, Dict
 
 import re
 import string
-from openrlhf_agent.agentkit.rewards.result_rewards.hub.math_utils import extract_answer
 
 from openrlhf_agent.agentkit.rewards import RewardPipeline
 from openrlhf_agent.agentkit.session import AgentSession
 from openrlhf_agent.agentkit.environments import FunctionCallEnvironment
 from openrlhf_agent.agentkit.protocols import Qwen3ThinkingProtocol
 from openrlhf_agent.agentkit.rewards.result_rewards import MatchingReward
-from openrlhf_agent.agentkit.tools import LocalSearchTool
+from openrlhf_agent.agentkit.tools import WikiSearchTool
 
 from openrlhf.utils.agent import MultiTurnAgentExecutor, AgentInstanceBase
 
@@ -21,25 +20,30 @@ You are a helpful assistant.
 ## Output Rules
 - First provide a clear markdown explanation of the solution.
 - Then end exactly with:
-  `Answer: \\boxed{{<final_answer>}}`
-- The boxed expression must contain only the final answer in canonical form.
-- Do not add any text after the boxed answer.
+  `Answer: <final_answer>`
+- The answer line must contain only the final answer in canonical form.
+- Do not add any text after the final answer line.
 """.strip()
 
 
+_ARTICLES_RE = re.compile(r"\b(a|an|the)\b")
+_FINAL_ANSWER_RE = re.compile(r"(?im)^\s*Answer:\s*(.+?)\s*$")
+_PUNCT_TRANSLATION = str.maketrans("", "", string.punctuation)
+
+
 # Synchronize with search-r1
-def normalize_answer(s):
-    def white_space_fix(text):
-        return " ".join(text.split())
+def normalize_answer(text: str) -> str:
+    text = text.lower().translate(_PUNCT_TRANSLATION)
+    text = _ARTICLES_RE.sub(" ", text)
+    return " ".join(text.split())
 
-    def remove_articles(text):
-        return re.sub(r"\b(a|an|the)\b", " ", text)
 
-    def remove_punc(text):
-        exclude = set(string.punctuation)
-        return "".join(ch for ch in text if ch not in exclude)
-
-    return white_space_fix(remove_articles(remove_punc(s.lower())))
+def extract_final_answer(response: str) -> str | None:
+    matches = _FINAL_ANSWER_RE.findall(response)
+    if matches:
+        answer = matches[-1].strip()
+        return answer or None
+    return None
 
 
 class EMMatchingReward(MatchingReward):
@@ -50,31 +54,25 @@ class EMMatchingReward(MatchingReward):
             labels = label
         else:
             raise NotImplementedError(f"Unsupported label type: {type(label)!r}")
-        
-        labels = [normalize_answer(l) for l in labels]
 
-        try:
-            pred_answer = normalize_answer(extract_answer(response.strip()))
-        except Exception:
+        pred_answer = extract_final_answer(response)
+        if pred_answer is None:
             return self.miss_score
 
-        for golden_answer in labels:
-            if pred_answer == golden_answer:
-                return self.correct_score
-
-        return self.miss_score
+        normalized_labels = {normalize_answer(str(item)) for item in labels}
+        normalized_pred_answer = normalize_answer(pred_answer)
+        return self.correct_score if normalized_pred_answer in normalized_labels else self.miss_score
 
 
 class AgentInstance(AgentInstanceBase):
     def __init__(self):
-        environment = FunctionCallEnvironment(
-            system_prompt=CUSTOM_SYSTEM_PROMPT.format(date=datetime.now().strftime("%Y-%m-%d")),
-            tools=[
-                LocalSearchTool(base_url="http://localhost:8000/retrieve"),
-            ],
-        )
         self.session = AgentSession(
-            environment=environment,
+            environment=FunctionCallEnvironment(
+                system_prompt=CUSTOM_SYSTEM_PROMPT.format(date=datetime.now().strftime("%Y-%m-%d")),
+                tools=[
+                    WikiSearchTool(base_url="http://localhost:8000/retrieve"),
+                ],
+            ),
             protocol=Qwen3ThinkingProtocol(),
             reward_pipeline=RewardPipeline(
                 result_reward=EMMatchingReward(

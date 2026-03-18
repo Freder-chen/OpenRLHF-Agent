@@ -1,4 +1,4 @@
-"""Local search tool backed by a retriever and formatted output."""
+"""Wiki search tool backed by a retriever and formatted output."""
 
 from __future__ import annotations
 
@@ -7,11 +7,11 @@ from typing import Any, Dict, Mapping, Sequence
 from openrlhf_agent.agentkit.tools import ToolBase
 
 
-class LocalSearchTool(ToolBase):
-    """Query a local retriever and return formatted passages."""
+class WikiSearchTool(ToolBase):
+    """Query a wiki-style retriever and return formatted passages."""
 
-    name = "local_search"
-    description = "Search a local retriever and return up to `topk` formatted passages."
+    name = "wiki_search"
+    description = "Search a wiki retriever and return up to `topk` formatted passages."
 
     MIN_TOPK = 1
     MAX_TOPK = 10
