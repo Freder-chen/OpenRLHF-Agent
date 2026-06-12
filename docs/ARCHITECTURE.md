@@ -1,30 +1,91 @@
 # OpenRLHF Agent Architecture
 
-OpenRLHF-Agent uses the same primitives for RL rollouts and production inference: `Environment`, `ChatProtocol`, `AgentSession`, `AgentRuntime`, and provider `LLMEngine`s. Below is the short map of where things live and how tokens flow.
+OpenRLHF-Agent uses the same primitives for RL rollouts and production inference: `Environment`, `ChatProtocol`, `AgentSession`, `AgentRuntime`, and provider `LLMEngine`s.
 
-## Module layout
+## Module Layout
 
-- `utils/types/`: shared dataclasses (`Message`, `ToolCall`, `Conversation`, `Action`, `Observation`, `RewardSample`).
-- `agentkit/session.py`: keeps chat history, renders prompts, and applies parsed actions.
-- `agentkit/runtime.py`: streams tokens through an `LLMEngine`, calling `AgentSession` each turn.
-- `agentkit/environments/`: base contract plus `hub/function_call.py` (tool calling, default `CommentaryTool`) and `hub/single_turn.py`.
-- `agentkit/tools/`: `ToolBase` and built-ins (`CommentaryTool`, `ThinkTool`, `FinalTool`).
-- `agentkit/protocols/`: prompt/render/parse codecs (`hub/qwen3_instruct.py`, `hub/qwen3_thinking.py`).
-- `agentkit/rewards/`: `RewardPipeline`, process reward (`process_rewards/hub/tool_call.py`), result rewards (`result_rewards/hub/matching.py` for string/math matching, `hub/grm.py`).
-- `backends/`: `LLMEngine` interface and OpenAI/vLLM HTTP client (`hub/openai.py`).
-- `examples/qwen3/`, `examples/single_turn/`: runnable demos for streaming and RL hooks.
+```
+src/openrlhf_agent/
+├── utils/types/
+│   ├── conversation.py    # Message, ToolCall, Conversation
+│   └── action.py          # Action, Status(CONTINUE/DONE), Observation
+├── backends/
+│   ├── base.py            # LLMEngine interface (generate, chat, tokenize)
+│   └── hub/openai.py      # OpenAI/vLLM HTTP client
+└── agentkit/
+    ├── session/
+    │   ├── base.py         # AgentSession — one continuous conversation segment
+    │   └── compactable.py  # CompactableSession — adds context compression
+    ├── runtime.py          # AgentRuntime — inference loop with token management
+    ├── environments/
+    │   ├── base.py         # Environment interface (system_prompt, tools, step)
+    │   └── hub/            # FunctionCallEnvironment, SingleTurnEnvironment
+    ├── tools/
+    │   ├── base.py         # ToolBase
+    │   └── hub/            # ThinkTool, WikiSearchTool, JinaReadTool, etc.
+    ├── protocols/
+    │   ├── base.py         # ChatProtocol (render/parse)
+    │   └── hub/            # Qwen3ThinkingProtocol, Qwen3InstructProtocol
+    └── rewards/
+        ├── pipeline.py     # RewardPipeline
+        ├── process_rewards/  # Per-step rewards (ToolCallReward)
+        └── result_rewards/   # Final-turn rewards (MatchingReward, GRMJudgeReward)
+```
 
-## Runtime data flow
+## Data Flow
 
-1. **Assembly**: pick an `Environment`, a `ChatProtocol`, an `LLMEngine`, optionally a `RewardPipeline`, then build `AgentSession` (or wrap it with `AgentRuntime` for inference).
-2. **Initialization**: `AgentSession.initialize` resets steps, seeds the system prompt and prior turns, and renders the first prompt with the tool manifest; `AgentRuntime` tokenizes it.
-3. **Stepping**: `LLMEngine.generate` produces text → `AgentSession.step_from_text` parses into an `Action` → `environment.step` runs tools/marks `done` → tool outputs are rendered back into the prompt; rewards are scored if attached.
-4. **Streaming/termination**: `AgentRuntime.run_steps` yields assistant/tool messages each turn and stops when `done` or `max_steps` is hit (otherwise emits a max-steps warning).
+### Inference (AgentRuntime)
 
-## Extending the system
+```
+AgentRuntime
+ │
+ ├─ session.initialize(messages)  →  prompt_text
+ │     └─ tokenize  →  prompt_ids
+ │
+ └─ loop:
+      ├─ engine.generate(prompt_ids)  →  action_ids, action_text
+      ├─ session.step_from_text(action_text)  →  observation
+      ├─ if DONE: return
+      ├─ prompt_ids += action_ids + tokenize(feedback_text)
+      └─ if token_count > threshold:
+           ├─ session.request_compact()  →  compact_feedback
+           ├─ engine.generate(prompt_ids + compact_feedback)  →  summary
+           ├─ session.finish_compact(summary)  →  new_prompt
+           └─ prompt_ids = tokenize(new_prompt)
+```
 
-- **Rewards**: implement `ResultRewardStrategy` or `ProcessRewardStrategy` and plug them into `RewardPipeline`.
-- **Tools**: subclass `ToolBase` and pass instances into environments or `env.register_tool(...)`.
-- **Environments**: extend `Environment` and override `step`; instantiate the class directly for `AgentSession` or `AgentRuntime`.
-- **Protocols**: subclass `ChatProtocol`, implement render/parse, and instantiate it directly.
-- **Backends**: implement `LLMEngine` (`tokenize`, `generate`) and pass it to `AgentRuntime`.
+### Training (agent_func + OpenRLHF)
+
+```
+OpenRLHF framework controls generate and token accumulation.
+AgentInstance only manages message-level state:
+
+reset(states):
+    session.initialize(payload)  →  prompt_text  →  return to framework
+
+step(states):
+    session.step_from_text(action_text)  →  observation, reward
+    return feedback_text to framework (framework appends tokens)
+```
+
+## Key Design Decisions
+
+**Token-in-token-out**: Runtime accumulates `prompt_ids` by direct concatenation. No re-tokenization of prior turns — avoids BPE mismatch issues that arise from `apply_chat_template` on full history.
+
+**Session is message-level only**: `AgentSession` tracks `Conversation` and `step_index`, but never touches token IDs. The caller (runtime or OpenRLHF) owns the token state.
+
+**Compact is two-step**: `request_compact()` returns the compact instruction as feedback_text. The same model generates the summary (tokens stay in the training trajectory). `finish_compact(summary)` re-initializes the session.
+
+**Environment is pure**: Only defines `system_prompt`, `tools`, and `step(action) → (observations, done)`. No step counting, no compaction — those belong to session/caller.
+
+**Status enum**: `Observation.status` is `CONTINUE` or `DONE`. No hidden states.
+
+## Extending
+
+| Want to... | Do this |
+|---|---|
+| Add a tool | Subclass `ToolBase`, pass to `FunctionCallEnvironment(tools=[...])` |
+| Add a reward | Implement `ResultRewardStrategy` or `ProcessRewardStrategy`, plug into `RewardPipeline` |
+| Support a new model | Subclass `ChatProtocol`, implement `render_messages` + `parse_assistant_text` |
+| Add a backend | Implement `LLMEngine` (`generate`, `chat`, `tokenize`) |
+| Enable compact | Use `CompactableSession` instead of `AgentSession`, set `max_context_tokens` on runtime |
