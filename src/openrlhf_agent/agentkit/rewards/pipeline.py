@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any, Optional
 
-from openrlhf_agent.utils.types import Action, RewardSample
+from openrlhf_agent.utils.types import Action, Conversation
 
 from .process_rewards.base import ProcessRewardStrategy
 from .result_rewards.base import ResultRewardStrategy
@@ -32,16 +32,14 @@ class RewardPipeline:
         action: Action,
         label: Optional[Any],
         done: bool,
-        sample: Optional[RewardSample] = None,
+        history: Optional[Conversation] = None,
     ) -> float:
-        """Compute a scalar reward for the latest action."""
-
         reward = 0.0
 
         if self._process_reward and not done:
             reward += await self._process_reward.score(action=action, label=label)
 
         if self._result_reward and done:
-            reward += await self._result_reward.score(action=action, label=label, sample=sample)
+            reward += await self._result_reward.score(action=action, label=label, history=history)
 
         return reward

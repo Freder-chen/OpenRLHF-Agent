@@ -4,6 +4,7 @@ from typing import Any, Dict
 
 from openrlhf_agent.agentkit.rewards import RewardPipeline
 from openrlhf_agent.agentkit.session import AgentSession
+from openrlhf_agent.utils.types import Status
 from openrlhf_agent.agentkit.environments import SingleTurnEnvironment
 from openrlhf_agent.agentkit.protocols import Qwen3ThinkingProtocol
 from openrlhf_agent.agentkit.rewards.result_rewards import MathMatchingReward
@@ -42,7 +43,7 @@ class AgentInstance(AgentInstanceBase):
             "sampling_params": states.get("sampling_params", None),
             "extra_logs": {
                 "dummy_scores": torch.tensor(reward),
-                "turn_count": torch.tensor(observation.step_index),
+                "turn_count": torch.tensor(self.session.step_index),
             },
         }
 

@@ -6,6 +6,7 @@ import torch
 
 from openrlhf_agent.agentkit.rewards import RewardPipeline
 from openrlhf_agent.agentkit.session import AgentSession
+from openrlhf_agent.utils.types import Status
 from openrlhf_agent.agentkit.environments import FunctionCallEnvironment
 from openrlhf_agent.agentkit.protocols import Qwen3ThinkingProtocol
 from openrlhf_agent.agentkit.rewards.result_rewards import GRMJudgeReward
@@ -46,7 +47,7 @@ class AgentInstance(AgentInstanceBase):
         reward = float(reward) if reward is not None else 0.0
         reward = max(reward, -1.0)
 
-        done = observation.done
+        done = observation.status == Status.DONE
         return {
             "rewards": torch.tensor(reward),
             "scores": torch.tensor(reward),
@@ -55,7 +56,7 @@ class AgentInstance(AgentInstanceBase):
             "sampling_params": states.get("sampling_params"),
             "extra_logs": {
                 "dummy_scores": torch.tensor(reward),
-                "turn_count": torch.tensor(observation.step_index),
+                "turn_count": torch.tensor(self.session.step_index),
             },
         }
 

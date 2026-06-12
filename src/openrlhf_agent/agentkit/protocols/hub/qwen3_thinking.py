@@ -158,17 +158,17 @@ class Qwen3ThinkingProtocol(ChatProtocol):
             payload = json.loads(raw_payload)
             assert "name" in payload.keys()
             assert "arguments" in payload.keys()
-        except Exception as exc:  # simple catch keeps message short
-            return ToolCall(call_id=f"call_{idx}", refusal=f"error parse json: {exc}")
+        except Exception as exc:
+            return ToolCall(call_id=f"call_{idx}", refusal=f"JSONParseError: Failed to parse tool call payload: {exc}")
 
         name = payload.get("name")
         arguments = payload.get("arguments")
 
         if not isinstance(name, str):
-            return ToolCall(call_id=f"call_{idx}", refusal="error parse json: name must be string.")
+            return ToolCall(call_id=f"call_{idx}", refusal="TypeError: Field `name` must be a string.")
 
         if not isinstance(arguments, dict):
-            return ToolCall(call_id=f"call_{idx}", refusal="error parse json: arguments must be dict.")
+            return ToolCall(call_id=f"call_{idx}", refusal="TypeError: Field `arguments` must be a JSON object.")
 
         return ToolCall(call_id=f"call_{idx}", name=name, arguments=arguments)
 

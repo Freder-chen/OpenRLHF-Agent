@@ -21,10 +21,10 @@ class SingleTurnEnvironment(Environment):
         *,
         system_prompt: Optional[str] = None,
     ) -> None:
-        resolved_prompt = system_prompt or DEFAULT_SINGLE_TURN_PROMPT
-        super().__init__(tools=[], system_prompt=resolved_prompt, max_steps=1)
+        super().__init__(
+            system_prompt=system_prompt or DEFAULT_SINGLE_TURN_PROMPT,
+        )
 
     async def step(self, action: Action) -> Tuple[List[str], bool]:
         self._step_index += 1
-
         return [], True

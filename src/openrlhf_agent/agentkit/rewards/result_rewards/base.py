@@ -5,7 +5,7 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from typing import Any, Optional
 
-from openrlhf_agent.utils.types import Action, RewardSample
+from openrlhf_agent.utils.types import Action, Conversation
 
 
 class ResultRewardStrategy(ABC):
@@ -17,7 +17,7 @@ class ResultRewardStrategy(ABC):
         *,
         action: Action,
         label: Optional[Any],
-        sample: Optional[RewardSample] = None,
+        history: Optional[Conversation] = None,
     ) -> float:
         """Return the reward for the assistant's final response."""
 

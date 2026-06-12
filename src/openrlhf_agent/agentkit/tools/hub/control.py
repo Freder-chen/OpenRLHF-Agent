@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 from typing import Any, Dict
 
 from openrlhf_agent.agentkit.tools.base import ToolBase
@@ -32,7 +31,7 @@ class CommentaryTool(ToolBase):
     }
 
     async def call(self, *, context: Dict[str, Any], arguments: Dict[str, Any]) -> str:
-        return json.dumps({"ok": True}, ensure_ascii=False)
+        return ""
 
 
 class FinalTool(ToolBase):
@@ -54,11 +53,8 @@ class FinalTool(ToolBase):
     async def call(self, *, context: Dict[str, Any], arguments: Dict[str, Any]) -> str:
         response = str(arguments.get("response", "")).strip()
         if not response:
-            return json.dumps(
-                {"ok": False, "error": "response must be a non-empty string."},
-                ensure_ascii=False,
-            )
-        return json.dumps({"ok": True, "response": response}, ensure_ascii=False)
+            return "InputValidationError: The required parameter `response` must be a non-empty string."
+        return response
 
 
 class ThinkTool(ToolBase):

@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Optional, Sequence
 
-from openrlhf_agent.utils.types import Action, RewardSample
+from openrlhf_agent.utils.types import Action, Conversation
 from openrlhf_agent.agentkit.rewards.result_rewards.base import ResultRewardStrategy
 from openrlhf_agent.agentkit.rewards.result_rewards.hub.math_utils import grade_answer_verl
 
@@ -32,7 +32,7 @@ class MatchingReward(ResultRewardStrategy):
         *,
         action: Action,
         label: Optional[Any],
-        sample: Optional[RewardSample] = None,
+        history: Optional[Conversation] = None,
     ) -> float:
         """Derive a reward from the parsed assistant action."""
 

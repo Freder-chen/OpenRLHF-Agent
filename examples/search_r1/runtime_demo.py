@@ -1,7 +1,9 @@
 import asyncio
 from datetime import datetime
+
 from openrlhf_agent.backends import OpenAIEngine
 from openrlhf_agent.agentkit.runtime import AgentRuntime
+from openrlhf_agent.agentkit.session import AgentSession
 from openrlhf_agent.agentkit.environments import FunctionCallEnvironment
 from openrlhf_agent.agentkit.protocols import Qwen3ThinkingProtocol
 from openrlhf_agent.agentkit.tools import WikiSearchTool
@@ -20,22 +22,22 @@ You are a helpful assistant.
 
 
 async def main() -> None:
-    agent_runtime = AgentRuntime(
-        protocol=Qwen3ThinkingProtocol(),
-        engine=OpenAIEngine(
-            model="qwen3", 
-            base_url="http://localhost:8009/v1",
-            api_key="empty"
-        ),
+    engine = OpenAIEngine(
+        model="qwen3",
+        base_url="http://localhost:8009/v1",
+        api_key="empty",
+    )
+    session = AgentSession(
         environment=FunctionCallEnvironment(
             system_prompt=CUSTOM_SYSTEM_PROMPT.format(date=datetime.now().strftime("%Y-%m-%d")),
-            tools=[
-                WikiSearchTool(base_url="http://localhost:8000/retrieve"),
-            ],
+            tools=[WikiSearchTool(base_url="http://localhost:8000/retrieve")],
         ),
+        protocol=Qwen3ThinkingProtocol(),
     )
+
+    rt = AgentRuntime(engine, session)
     messages = [{"role": "user", "content": "what's your goal?"}]
-    async for message in agent_runtime.run_steps(messages):
+    async for message in rt.run_steps(messages):
         print(message)
 
 
