@@ -8,7 +8,8 @@ from .base import AgentSession
 
 
 COMPACT_USER_PROMPT = """
-Context compression requested by the agent runtime. This is not a user message.
+<harness_call>
+Context compression requested by the agent runtime.
 Summarize the conversation above so the agent can continue working from the summary.
 
 Your summary should include the following sections:
@@ -19,18 +20,21 @@ Your summary should include the following sections:
 5. All user messages (not tool results) — tracks changing intent
 6. Pending tasks not yet completed
 7. What was being worked on immediately before this request
-8. Next step (only if explicitly requested by the user)
+8. Next step
 
 Please provide your summary directly, following this structure.
+</harness_call>
 """.strip()
 
 RESUME_PROMPT_TEMPLATE = """
+<harness_call>
 This session is being continued from a previous conversation that ran out of context.
 The summary below covers what has been done so far.
 
 {summary}
 
 Continue working on the user's request based on this summary.
+</harness_call>
 """.strip()
 
 
@@ -64,7 +68,6 @@ class CompactableSession(AgentSession):
 
         Returns the new prompt text.
         """
-        payload = [
+        return await self.initialize([
             {"role": "user", "content": RESUME_PROMPT_TEMPLATE.format(summary=summary)},
-        ]
-        return await self.initialize(payload)
+        ])
