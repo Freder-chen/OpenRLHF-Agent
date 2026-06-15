@@ -50,7 +50,7 @@ class FunctionCallEnvironment(Environment):
 
         # No tool calls and no parse error — check for empty response.
         elif not (action.content or "").strip():
-            observations = ["EmptyResponseError: The assistant response is empty. Please provide a response."]
+            observations = ["EmptyResponseError: The assistant produced no content or tool calls."]
             terminated = False
 
         # Final reply.
