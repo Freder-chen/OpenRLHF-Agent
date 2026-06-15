@@ -24,10 +24,14 @@ Your summary should include the following sections:
 Please provide your summary directly, following this structure.
 """.strip()
 
-RESUME_PREFIX = (
-    "This session is being continued from a previous conversation that ran out "
-    "of context. The summary below covers the earlier portion of the conversation."
-)
+RESUME_PROMPT_TEMPLATE = """
+This session is being continued from a previous conversation that ran out of context.
+The summary below covers what has been done so far.
+
+{summary}
+
+Continue working on the user's request based on this summary.
+""".strip()
 
 
 class CompactableSession(AgentSession):
@@ -61,6 +65,6 @@ class CompactableSession(AgentSession):
         Returns the new prompt text.
         """
         payload = [
-            {"role": "user", "content": f"{RESUME_PREFIX}\n\n{summary}"},
+            {"role": "user", "content": RESUME_PROMPT_TEMPLATE.format(summary=summary)},
         ]
         return await self.initialize(payload)
