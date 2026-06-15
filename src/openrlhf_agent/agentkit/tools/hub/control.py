@@ -1,4 +1,4 @@
-"""Control-plane tools for hidden reasoning, status updates, and explicit finals."""
+"""Control-plane tools for reasoning and structured output."""
 
 from __future__ import annotations
 
@@ -7,24 +7,37 @@ from typing import Any, Dict
 from openrlhf_agent.agentkit.tools.base import ToolBase
 
 
+class ThinkTool(ToolBase):
+    """Concise reasoning visible to the user."""
+
+    name = "think"
+    description = "Use this tool to think a step before acting."
+    parameters: Dict[str, Any] = {
+        "type": "object",
+        "properties": {
+            "thought": {
+                "type": "string",
+                "description": "A concrete reasoning step with specific details: what you found, what it means, what to do next.",
+            }
+        },
+        "required": ["thought"],
+    }
+
+    async def call(self, *, context: Dict[str, Any], arguments: Dict[str, Any]) -> str:
+        return ""
+
+
 class CommentaryTool(ToolBase):
-    """Send a brief status update separate from the final answer."""
+    """Emit a brief progress update visible to the user."""
 
     name = "commentary"
-    description = (
-        "Send a short status update about current actions or progress. "
-        "Do not use this tool for the final answer or key content."
-    )
+    description = "Send a short progress update to the user while you continue working."
     parameters: Dict[str, Any] = {
         "type": "object",
         "properties": {
             "message": {
                 "type": "string",
-                "description": (
-                    "Short status message about the current action, e.g. "
-                    "\"Checking recent data\", \"Reviewing code\". "
-                    "Do not include final answers or long explanations."
-                ),
+                "description": "A brief progress status.",
             },
         },
         "required": ["message"],
@@ -35,16 +48,16 @@ class CommentaryTool(ToolBase):
 
 
 class FinalTool(ToolBase):
-    """Explicit final-answer tool for structured outputs."""
+    """Explicitly mark the final response to the user."""
 
     name = "final"
-    description = "Return the final response that will be shown to the user."
+    description = "Submit your final answer to the user. Use this when you are done."
     parameters: Dict[str, Any] = {
         "type": "object",
         "properties": {
             "response": {
                 "type": "string",
-                "description": "Final response to the user.",
+                "description": "The final answer to present to the user.",
             },
         },
         "required": ["response"],
@@ -55,23 +68,3 @@ class FinalTool(ToolBase):
         if not response:
             return "InputValidationError: The required parameter `response` must be a non-empty string."
         return response
-
-
-class ThinkTool(ToolBase):
-    """Capture hidden reasoning, plans, and intermediate calculations."""
-
-    name = "think"
-    description = "Structured thinking tool for the model to capture reasoning, plans, and intermediate calculations."
-    parameters: Dict[str, Any] = {
-        "type": "object",
-        "properties": {
-            "note": {
-                "type": "string",
-                "description": "Step-by-step reasoning, a concise plan, and intermediate calculations.",
-            }
-        },
-        "required": ["note"],
-    }
-
-    async def call(self, *, context: Dict[str, Any], arguments: Dict[str, Any]) -> str:
-        return ""

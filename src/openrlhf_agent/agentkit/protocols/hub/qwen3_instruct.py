@@ -138,6 +138,11 @@ class Qwen3InstructProtocol(ChatProtocol):
         content_parts.append(raw[cursor:])
         content = "".join(content_parts).strip()
 
+        if not content and not tool_calls:
+            return Action(
+                refusal="EmptyResponseError: The assistant response has no content or tool calls.",
+            )
+
         return Action(
             content=content or None,
             tool_calls=tool_calls or None,

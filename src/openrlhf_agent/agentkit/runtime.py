@@ -58,13 +58,17 @@ class AgentRuntime:
                 and len(prompt_ids) > self.max_context_tokens
                 and hasattr(self.session, 'request_compact')
             ):
+                print(f"[compact] {len(prompt_ids)} tokens > {self.max_context_tokens} threshold, compacting...")
                 compact_feedback = self.session.request_compact()
-                _, summary_text = await self.engine.generate(
+                _, summary_raw = await self.engine.generate(
                     prompt_ids + await self.engine.tokenize(compact_feedback),
                     max_tokens=self.max_new_tokens_per_step,
                 )
+                parsed = self.session.protocol.parse_assistant_text(summary_raw)
+                summary_text = parsed.content or summary_raw
                 new_prompt = await self.session.finish_compact(summary_text)
                 prompt_ids = await self.engine.tokenize(new_prompt)
+                print(f"[compact] done, new prompt: {len(prompt_ids)} tokens")
 
     async def run_final(self, messages: Sequence[Dict[str, Any]]) -> Optional[str]:
         final_text: Optional[str] = None

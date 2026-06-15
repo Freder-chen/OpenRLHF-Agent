@@ -144,6 +144,13 @@ class Qwen3ThinkingProtocol(ChatProtocol):
         content_parts.append(assistant_text[cursor:])
         content = "".join(content_parts).strip()
 
+        # Only reasoning, no content or tool calls — incomplete response.
+        if not content and not tool_calls:
+            return Action(
+                reasoning_content=reasoning_content or None,
+                refusal="EmptyResponseError: No content or tool calls after </think>.",
+            )
+
         return Action(
             content=content or None,
             tool_calls=tool_calls or None,

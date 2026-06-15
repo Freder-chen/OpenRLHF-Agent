@@ -48,7 +48,12 @@ class FunctionCallEnvironment(Environment):
             ])
             terminated = False
 
-        # No tool calls and no parse error — this is the final reply.
+        # No tool calls and no parse error — check for empty response.
+        elif not (action.content or "").strip():
+            observations = ["EmptyResponseError: The assistant response is empty. Please provide a response."]
+            terminated = False
+
+        # Final reply.
         else:
             observations = []
             terminated = True
