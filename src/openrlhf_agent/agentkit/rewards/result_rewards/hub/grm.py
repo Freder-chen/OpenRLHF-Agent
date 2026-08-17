@@ -13,7 +13,7 @@ from jinja2 import Environment
 from openai import AsyncOpenAI
 
 from openrlhf_agent.agentkit.rewards.result_rewards.base import ResultRewardStrategy
-from openrlhf_agent.utils.types import Action, Conversation
+from openrlhf_agent.utils.types import Action, RewardSample
 
 
 logger = logging.getLogger(__name__)
@@ -134,11 +134,11 @@ def _normalize_messages(payload: Iterable[Any]) -> list[dict[str, str]]:
     return normalized
 
 
-def render_question_from_history(history: Optional[Conversation]) -> str:
-    if not history or not history.prompt_messages:
+def render_question_from_sample(sample: Optional[RewardSample]) -> str:
+    if not sample or not sample.question:
         return ""
 
-    question_payload = history.prompt_messages
+    question_payload = sample.question
     if isinstance(question_payload, str):
         return question_payload.strip()
 
@@ -211,7 +211,7 @@ class GRMJudgeReward(ResultRewardStrategy):
         *,
         action: Action,
         label: Optional[Any],
-        history: Optional[Conversation] = None,
+        sample: Optional[RewardSample] = None,
     ) -> float:
         """Request the external evaluator to score the final answer."""
 
@@ -219,7 +219,7 @@ class GRMJudgeReward(ResultRewardStrategy):
         if not response:
             return self.error_score
 
-        question_text = render_question_from_history(history)
+        question_text = render_question_from_sample(sample)
         prompt = self._prepare_prompt(question=question_text, label=label, response=response)
         verdict_text = await self._score_with_judge(prompt)
         if not verdict_text:

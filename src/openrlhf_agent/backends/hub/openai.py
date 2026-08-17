@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import os
-from typing import Dict, List, Optional, Sequence, Tuple, Union
+from typing import List, Optional, Tuple, Union
 
 import httpx
 from openai import AsyncOpenAI
@@ -19,6 +19,7 @@ class OpenAIEngine(LLMEngine):
         model: Optional[str] = None,
         base_url: Optional[str] = None,
         api_key: Optional[str] = None,
+        timeout: float = 600.0,
     ):
         self.base_url = base_url or os.getenv("OPENAI_BASE_URL")
         self.api_key = api_key or os.getenv("OPENAI_API_KEY")
@@ -26,6 +27,7 @@ class OpenAIEngine(LLMEngine):
         self.client = AsyncOpenAI(
             base_url=self.base_url,
             api_key=self.api_key,
+            timeout=timeout,
         )
         self.model = model or os.getenv("OPENAI_MODEL")
 
@@ -42,6 +44,7 @@ class OpenAIEngine(LLMEngine):
             self._token_client = httpx.AsyncClient(
                 base_url=tokenize_base_url,
                 headers=headers or None,
+                timeout=timeout,
             )
         else:
             self._token_client = None
@@ -50,36 +53,26 @@ class OpenAIEngine(LLMEngine):
         self,
         prompt: Optional[Union[str, List[int]]],
         max_tokens: int = 10240,
-        temperature: float = 0.6,
+        # temperature: float = 1.0,
+        # top_k=-1,
+        # top_p=1.0,
+        # stream: bool = False,
     ) -> Tuple[List[int], str]:
         response = await self.client.completions.create(
             model=self.model,
             prompt=prompt,
             max_tokens=max_tokens,
-            temperature=temperature,
-            extra_body={
-                "return_token_ids": True,
-            },
+            # temperature=temperature,
+            # top_p=top_p,
+            # stream=stream,
+            extra_body=dict(
+                # top_k=top_k,
+                return_token_ids=True,
+            ),
         )
         token_ids = response.choices[0].token_ids
         text = response.choices[0].text
         return token_ids, text
-
-    async def chat(
-        self,
-        messages: Sequence[Dict[str, str]],
-        max_tokens: int = 10240,
-        temperature: float = 0.6,
-    ) -> str:
-        response = await self.client.chat.completions.create(
-            model=self.model,
-            messages=list(messages),
-            max_tokens=max_tokens,
-            temperature=temperature,
-        )
-        message = response.choices[0].message
-        text = message.content or ""
-        return text if isinstance(text, str) else str(text)
 
     async def tokenize(self, prompt: str) -> List[int]:
         if self._token_client is None:

@@ -1,7 +1,7 @@
 """Shared domain models used across the agent runtime."""
 
 from .conversation import ToolCall, Message, Conversation
-from .action import Action, Status, Observation
+from .action import Action, Observation, RewardSample
 
 __all__ = [
     "ToolCall",
@@ -9,6 +9,6 @@ __all__ = [
     "Conversation",
 
     "Action",
-    "Status",
     "Observation",
+    "RewardSample",
 ]

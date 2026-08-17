@@ -138,17 +138,22 @@ class Qwen3ThinkingProtocol(ChatProtocol):
             start, end = match.span()
             content_parts.append(assistant_text[cursor:start])
             payload = match.group("body").strip()
-            tool_calls.append(self._parse_call(payload, idx=idx))
+            tool_call = self._parse_call(payload, idx=idx)
+            if tool_call.refusal:
+                return Action(
+                    reasoning_content=reasoning_content or None,
+                    refusal=f"Invalid tool call #{idx}: {tool_call.refusal}",
+                )
+            tool_calls.append(tool_call)
             cursor = end
 
         content_parts.append(assistant_text[cursor:])
         content = "".join(content_parts).strip()
 
-        # Only reasoning, no content or tool calls — incomplete response.
-        if not content and not tool_calls:
+        if tool_calls and content:
             return Action(
                 reasoning_content=reasoning_content or None,
-                refusal="EmptyResponseError: No content or tool calls after </think>.",
+                refusal="Unexpected text outside <tool_call> tags in a tool-calling step.",
             )
 
         return Action(
@@ -165,17 +170,17 @@ class Qwen3ThinkingProtocol(ChatProtocol):
             payload = json.loads(raw_payload)
             assert "name" in payload.keys()
             assert "arguments" in payload.keys()
-        except Exception as exc:
-            return ToolCall(call_id=f"call_{idx}", refusal=f"JSONParseError: Failed to parse tool call payload: {exc}")
+        except Exception as exc:  # simple catch keeps message short
+            return ToolCall(call_id=f"call_{idx}", refusal=f"error parse json: {exc}")
 
         name = payload.get("name")
         arguments = payload.get("arguments")
 
         if not isinstance(name, str):
-            return ToolCall(call_id=f"call_{idx}", refusal="TypeError: Field `name` must be a string.")
+            return ToolCall(call_id=f"call_{idx}", refusal="error parse json: name must be string.")
 
         if not isinstance(arguments, dict):
-            return ToolCall(call_id=f"call_{idx}", refusal="TypeError: Field `arguments` must be a JSON object.")
+            return ToolCall(call_id=f"call_{idx}", refusal="error parse json: arguments must be dict.")
 
         return ToolCall(call_id=f"call_{idx}", name=name, arguments=arguments)
 
@@ -192,6 +197,9 @@ class Qwen3ThinkingProtocol(ChatProtocol):
             return raw, None
 
         reasoning = raw[:end_idx].strip()
+        lower_reasoning = reasoning.lower()
+        if lower_reasoning.startswith("<think>"):
+            reasoning = reasoning[len("<think>") :].lstrip("\n")
         remainder = raw[end_idx + len(end_tag) :].lstrip()
         return reasoning or None, remainder
 

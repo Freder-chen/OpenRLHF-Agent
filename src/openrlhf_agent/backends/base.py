@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from typing import Dict, List, Optional, Sequence, Tuple, Union
+from typing import List, Optional, Tuple, Union
 
 
 class LLMEngine(ABC):
@@ -18,16 +18,6 @@ class LLMEngine(ABC):
         stream: bool = False,
     ) -> Tuple[List[int], str]:
         """Return generated token ids and the decoded text."""
-
-    @abstractmethod
-    async def chat(
-        self,
-        messages: Sequence[Dict[str, str]],
-        max_tokens: int = 10240,
-        temperature: float = 0.6,
-        stream: bool = False,
-    ) -> str:
-        """Return decoded text from a chat-style completion call."""
 
     @abstractmethod
     async def tokenize(self, prompt: str) -> List[int]:

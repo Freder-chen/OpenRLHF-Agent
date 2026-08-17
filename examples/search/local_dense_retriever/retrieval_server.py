@@ -16,6 +16,7 @@
 # Adapted from https://github.com/PeterGriffinJin/Search-R1/blob/main/search_r1/search/retrieval_server.py
 
 import argparse
+import asyncio
 import json
 import warnings
 
@@ -324,9 +325,14 @@ class QueryRequest(BaseModel):
 
 app = FastAPI()
 
+# faiss-GPU is NOT thread-safe: concurrent index.search() calls corrupt its
+# device-memory stack and crash the process. Serialize all retrieval through a
+# single lock so concurrent requests queue instead of racing on the GPU.
+_RETRIEVE_LOCK = asyncio.Lock()
+
 
 @app.post("/retrieve")
-def retrieve_endpoint(request: QueryRequest):
+async def retrieve_endpoint(request: QueryRequest):
     """
     Endpoint that accepts queries and performs retrieval.
 
@@ -353,8 +359,11 @@ def retrieve_endpoint(request: QueryRequest):
     if not request.topk:
         request.topk = config.retrieval_topk  # fallback to default
 
-    # Perform batch retrieval
-    tmp = retriever.batch_search(query_list=request.queries, num=request.topk, return_score=request.return_scores)
+    # Perform batch retrieval (serialized: faiss-GPU is not thread-safe)
+    async with _RETRIEVE_LOCK:
+        tmp = retriever.batch_search(
+            query_list=request.queries, num=request.topk, return_score=request.return_scores
+        )
 
     scores = []
     try:
@@ -381,13 +390,13 @@ if __name__ == "__main__":
     parser.add_argument(
         "--index_path",
         type=str,
-        default="/home/peterjin/mnt/index/wiki-18/e5_Flat.index",
+        required=True,
         help="Corpus indexing file.",
     )
     parser.add_argument(
         "--corpus_path",
         type=str,
-        default="/home/peterjin/mnt/data/retrieval-corpus/wiki-18.jsonl",
+        required=True,
         help="Local corpus file.",
     )
     parser.add_argument("--topk", type=int, default=3, help="Number of retrieved passages for one query.")

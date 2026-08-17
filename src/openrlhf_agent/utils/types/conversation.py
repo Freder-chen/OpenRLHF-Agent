@@ -22,35 +22,36 @@ class Message(BaseModel):
     role: str
     content: Optional[str] = None
     tool_calls: Optional[List[ToolCall]] = None
-    reasoning_content: Optional[str] = None
+    reasoning_content: Optional[str] = None  # used by reasoning-capable backends
 
 
 class Conversation:
-    """Stores chat messages with a clear boundary between prompt and process."""
+    """Stores chat messages and knows how to render them."""
 
-    def __init__(self, *, system_prompt: str, messages: Iterable[Message | Mapping[str, Any]] = ()) -> None:
-        self._messages: List[Message] = [Message(role="system", content=system_prompt)]
-        for item in messages:
-            if isinstance(item, Message):
-                self._messages.append(item)
-            elif isinstance(item, Mapping):
-                self._messages.append(Message(**item))
-        self.prompt_length: int = len(self._messages)
+    def __init__(self) -> None:
+        self._messages: List[Message] = []
+
+    def reset(self, *, system_prompt: str) -> None:
+        """Start a fresh transcript using the provided system prompt."""
+
+        self._messages = [Message(role="system", content=system_prompt)]
+
+    def extend(self, messages: Iterable[Message | Mapping[str, Any]]) -> None:
+        """Append a list of historical messages."""
+
+        for message in messages:
+            if isinstance(message, Message):
+                self._messages.append(message)
+            elif isinstance(message, Mapping):
+                self._messages.append(Message(**message))
 
     def append(self, message: Message) -> None:
-        self._messages.append(message)
+        """Append a message and return it for convenience."""
 
-    def extend(self, messages: Iterable[Message]) -> None:
-        self._messages.extend(messages)
+        self._messages.append(message)
 
     @property
     def messages(self) -> List[dict]:
-        return [m.model_dump(exclude_none=True) for m in self._messages]
+        """Expose a shallow copy for inspection or debugging."""
 
-    @property
-    def prompt_messages(self) -> List[dict]:
-        return [m.model_dump(exclude_none=True) for m in self._messages[:self.prompt_length]]
-
-    @property
-    def process_messages(self) -> List[dict]:
-        return [m.model_dump(exclude_none=True) for m in self._messages[self.prompt_length:]]
+        return [message.model_dump(exclude_none=True) for message in self._messages]

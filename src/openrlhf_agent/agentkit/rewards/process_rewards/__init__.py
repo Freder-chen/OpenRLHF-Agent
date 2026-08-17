@@ -1,6 +1,9 @@
 """Process reward strategies grouped under process_rewards."""
 
 from .base import ProcessRewardStrategy
-from .hub.tool_call import ToolCallReward
+from .hub.tool_format import ToolFormatReward
 
-__all__ = ["ProcessRewardStrategy", "ToolCallReward"]
+__all__ = [
+    "ProcessRewardStrategy",
+    "ToolFormatReward",
+]

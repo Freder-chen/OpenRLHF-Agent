@@ -1,22 +1,19 @@
 #!/bin/bash
 
 SCRIPT_DIR="$(dirname "$0")"
-WORK_DIR="$(realpath "$SCRIPT_DIR/../..")"
+WORK_DIR="$(realpath "$SCRIPT_DIR/../../..")"
 
 set -x
 
-MODEL_PATH="Qwen/Qwen3-4B-Thinking-2507"
-DATASET_PATH="PeterJinGo/nq_hotpotqa_train"
-# test: "RUC-NLPIR/FlashRAG_datasets"
-SAVE_PATH="${WORK_DIR}/exp/Qwen3-Search-R1"
+MODEL_PATH="Qwen/Qwen2.5-7B"
+DATASET_PATH="PeterJinGo/nq_hotpotqa_train" # use nq_hotpotqa_train/train.parquet
+SAVE_PATH="${WORK_DIR}/exp/Qwen2.5-Search-R1-7B-baseline"
 
-# Demo for search
-AGENT_FUNC_PATH="${SCRIPT_DIR}/agent_func.py"
-
+AGENT_FUNC_PATH="$(realpath "$SCRIPT_DIR")/agent_func.py"
 
 CKPT_ARGS=(
    --pretrain ${MODEL_PATH}
-   # --reward_pretrain ${REWARD_MODEL} # agent mode no use
+   # --reward_pretrain ${REWARD_MODEL} # not used in agent mode
    --load_checkpoint
 
    --save_path ${SAVE_PATH}
@@ -30,41 +27,39 @@ ROLLOUT_ARGS=(
    --agent_func_path ${AGENT_FUNC_PATH}
 
    --prompt_data ${DATASET_PATH}
-   --input_key prompt
-   --label_key label
-   --prompt_max_len 10240
-   --generate_max_len 64000
+   --input_key question
+   --label_key golden_answers
+   --prompt_max_len 8000
+   --generate_max_len 120000
    --apply_chat_template
    --packing_samples
 
+   --vllm_generate_batch_size 128
    --rollout_batch_size 128
    --n_samples_per_prompt 8
    --train_batch_size 1024
 
-   --dynamic_filtering
-   --dynamic_filtering_reward_range 0.0 1.0
-
    --use_dynamic_batch
-   --train_max_tokens_per_gpu 16192
-   --rollout_max_tokens_per_gpu 32768
+   --train_max_tokens_per_gpu 16384
+   --rollout_max_tokens_per_gpu 24576
 
-   # --micro_train_batch_size 1
-   # --micro_rollout_batch_size 8
-   --max_samples 128000
+   --max_samples 1280000000
    --max_epochs 1
    --num_episodes 1
 )
 
 ENGINE_ARGS=(
+   --async_train
+   --partial_rollout
+
    --ref_num_nodes 1
    --ref_num_gpus_per_node 8
    --actor_num_nodes 1
    --actor_num_gpus_per_node 8
-   --vllm_num_engines 4
+   --vllm_num_engines 8
    --vllm_tensor_parallel_size 2
-   --vllm_gpu_memory_utilization 0.7
-   --colocate_all_models
-   --vllm_enable_sleep
+   --vllm_gpu_memory_utilization 0.9
+   --colocate_actor_ref
    --deepspeed_enable_sleep
    --vllm_sync_backend nccl
    --enforce_eager
@@ -77,7 +72,7 @@ ENGINE_ARGS=(
 )
 
 OPTIMIZER_ARGS=(
-   --advantage_estimator reinforce_baseline
+   --advantage_estimator reinforce
    --actor_learning_rate 5e-7
    # --critic_learning_rate 9e-6
    --entropy_loss_coef 0.0
@@ -93,7 +88,8 @@ LOG_ARGS=(
    --eval_steps -1
 )
 
-
+# CUDA_VISIBLE_DEVICES=4,5,6,7 ray start --head --num-gpus=4 --temp-dir="${RAY_TMPDIR:-${TMPDIR:-/tmp}/ray}"
+# ray start --head --temp-dir="${RAY_TMPDIR:-${TMPDIR:-/tmp}/ray}"
 ray job submit --address="http://127.0.0.1:8265" \
    -- python3 -m openrlhf.cli.train_ppo_ray \
    ${CKPT_ARGS[@]} \
