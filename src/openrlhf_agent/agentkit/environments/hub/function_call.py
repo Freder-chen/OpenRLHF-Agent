@@ -27,7 +27,7 @@ class FunctionCallEnvironment(Environment):
         max_steps: int = 9999,
     ) -> None:
         super().__init__(
-            tools=list(tools or []),
+            tools=tools or [],
             system_prompt=system_prompt or SYSTEM_PROMPT,
             max_steps=max_steps,
         )
