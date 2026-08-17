@@ -4,15 +4,14 @@ from __future__ import annotations
 
 import asyncio
 import json
-from datetime import datetime
 from typing import Any, Dict, List, Optional, Sequence, Set, Tuple
 
 from openrlhf_agent.utils.types import Action, ToolCall
 from openrlhf_agent.agentkit.environments.base import Environment
-from openrlhf_agent.agentkit.tools import ThinkTool, ToolBase
+from openrlhf_agent.agentkit.tools import ToolBase
 
 
-SYSTEM_PROMPT_TEMPLATE = """
+SYSTEM_PROMPT = """
 You are a helpful assistant.
 """.strip()
 
@@ -27,10 +26,9 @@ class FunctionCallEnvironment(Environment):
         system_prompt: Optional[str] = None,
         max_steps: int = 9999,
     ) -> None:
-        tools = tools or []
         super().__init__(
-            tools=list(tools),
-            system_prompt=system_prompt or SYSTEM_PROMPT_TEMPLATE,
+            tools=list(tools or []),
+            system_prompt=system_prompt or SYSTEM_PROMPT,
             max_steps=max_steps,
         )
 
