@@ -111,11 +111,9 @@ Built-in rewards cover malformed tools, selected tool penalties, direct matching
 OpenRLHF owns generation and token accumulation. The example `AgentInstance` only connects it to `AgentSession`:
 
 ```text
-reset -> initialize with the raw question -> return rendered prompt
+reset -> initialize the session -> return the model prompt
 step  -> parse action -> run environment -> return reward and feedback
 ```
-
-The dataset question must remain unformatted because `AgentSession.initialize()` applies the protocol template. Do not enable OpenRLHF's `--data.apply_chat_template` for these agents, or the prompt will be formatted twice.
 
 ## Extension Points
 

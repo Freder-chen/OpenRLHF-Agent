@@ -59,12 +59,8 @@ A vLLM server can expose Chat Completions. Use `OpenAIChatBackend` for that endp
 | Directory | Purpose |
 |---|---|
 | [`examples/math/`](examples/math/) | Math inference, evaluation, and training |
-| [`examples/search/qwen2p5_instruct/`](examples/search/qwen2p5_instruct/) | Search with Qwen2.5 Instruct |
-| [`examples/search/qwen3_thinking/`](examples/search/qwen3_thinking/) | Search with Qwen3 Thinking |
-| [`examples/search/local_dense_retriever/`](examples/search/local_dense_retriever/) | Local Wiki retriever setup |
-| [`examples/robot/libero/`](examples/robot/libero/) | Multimodal LIBERO inference |
-
-Search examples require the [local retriever](examples/search/local_dense_retriever/README.md). The LIBERO example has its own [setup guide](examples/robot/libero/README.md) because its simulator uses a separate Python 3.8 environment.
+| [`examples/search/`](examples/search/) | Qwen2.5 and Qwen3 search examples with local retrieval |
+| [`examples/robot/`](examples/robot/) | Multimodal robot inference |
 
 ## Train with OpenRLHF
 
@@ -75,8 +71,6 @@ bash examples/math/train_reinforce_agent.sh
 bash examples/search/qwen2p5_instruct/train_reinforce_agent.sh
 bash examples/search/qwen3_thinking/train_reinforce_agent.sh
 ```
-
-The adapters receive raw dataset questions and apply their own protocol templates. Do not add OpenRLHF's `--data.apply_chat_template`, or the prompt will be formatted twice.
 
 ## Extend
 
