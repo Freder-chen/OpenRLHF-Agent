@@ -55,7 +55,11 @@ class OpenAIResponsesBackend(ChatBackend):
                         )
                     elif part["type"] == "image_url":
                         converted_content.append(
-                            {"type": "input_image", "image_url": part["image_url"]["url"]}
+                            {
+                                "type": "input_image",
+                                "image_url": part["image_url"]["url"],
+                                "detail": "auto",
+                            }
                         )
                     else:
                         raise ValueError(f"Unsupported content type: {part['type']}")
@@ -70,6 +74,15 @@ class OpenAIResponsesBackend(ChatBackend):
                 })
                 continue
 
+            if role == "assistant" and message.get("reasoning_content"):
+                input_items.append({
+                    "type": "reasoning",
+                    "summary": [],
+                    "content": [{
+                        "type": "reasoning_text",
+                        "text": message["reasoning_content"],
+                    }],
+                })
             if content is not None:
                 input_items.append({"role": role, "content": converted_content})
             if role == "assistant":
