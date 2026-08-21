@@ -3,82 +3,53 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from typing import Any, Dict, List, Optional, Sequence, Tuple
+from typing import Any, Sequence
 
-from openrlhf_agent.utils.types import Action, ToolCall
+from openrlhf_agent.utils.types import Action, Message, ToolCall
 from openrlhf_agent.agentkit.tools import ToolBase
 
 
 class Environment(ABC):
-    """Base interface describing the agent environment contract."""
+    """Base class for stateful agent environments."""
 
     def __init__(
         self,
         *,
-        tools: Sequence[ToolBase],
         system_prompt: str,
-        max_steps: int,
+        tools: Sequence[ToolBase] = (),
+        max_steps: int | None = None,
     ) -> None:
-        # Tools
-        tool_list = list(tools)
-        if len({tool.name for tool in tool_list}) != len(tool_list):
+        self.tools = {tool.name: tool for tool in tools}
+        if len(self.tools) != len(tools):
             raise ValueError("Tool names must be unique.")
-        self._tool_map: Dict[str, ToolBase] = {tool.name: tool for tool in tool_list}
-        
-        # Prompt
-        self._system_prompt = system_prompt
-        if self._system_prompt is None:
-            raise NotImplementedError(
-                f"{type(self).__name__} must supply a system prompt via __init__ or override this property."
-            )
 
-        # Step
-        self._step_index = 0
-        self._max_steps = max_steps
+        if max_steps is not None and max_steps < 1:
+            raise ValueError("max_steps must be at least 1 or None")
 
-    def tools_manifest(self) -> List[Dict[str, Any]]:
-        return [tool.openai_tool() for tool in self._tool_map.values()]
+        self.system_prompt = system_prompt
+        self.max_steps = max_steps
+        self.step_index = 0
 
-    async def execute_tool(self, call: ToolCall, context: Dict[str, Any]) -> str:
+    def tools_manifest(self) -> list[dict[str, Any]]:
+        """Return tools in the OpenAI function-calling format."""
+
+        return [tool.openai_tool() for tool in self.tools.values()]
+
+    async def execute_tool(self, call: ToolCall, context: dict[str, Any]) -> Any:
         """Execute one tool invocation."""
 
-        if call.name not in self._tool_map:
+        if call.name not in self.tools:
             raise KeyError(f"Unknown tool '{call.name}'.")
-        
-        tool = self._tool_map[call.name]
-        arguments = call.arguments
-        
-        if arguments is None or isinstance(arguments, dict):
-            return await tool.call(context=context, arguments=arguments)
 
-        raise TypeError("Tool arguments must be a JSON object.")
+        tool = self.tools[call.name]
+        return await tool.call(context=context, arguments=call.arguments or {})
 
-    def tool_names(self) -> List[str]:
-        return list(self._tool_map.keys())
+    async def reset(self) -> list[Message]:
+        """Reset one rollout. Stateful async environments may override this."""
 
-    def register_tool(self, tool: ToolBase) -> None:
-        """Add a tool at runtime."""
-
-        if tool.name in self._tool_map:
-            raise ValueError(f"Tool '{tool.name}' already exists.")
-        self._tool_map[tool.name] = tool
-
-    @property
-    def system_prompt(self) -> str:
-        """Return the system prompt used for the agent."""
-        return self._system_prompt
-
-    def reset_step(self) -> None:
-        self._step_index = 0
-    
-    @property
-    def step_index(self) -> int:
-        return self._step_index
-
-    @property
-    def max_steps(self) -> int:
-        return self._max_steps
+        self.step_index = 0
+        return []
 
     @abstractmethod
-    async def step(self, action: Action) -> Tuple[List[str], bool]:
+    async def step(self, action: Action) -> tuple[list[str | Message], bool]:
         """Run one environment transition and return (observations, done)."""

@@ -1,17 +1,17 @@
-"""Environment that supports function calls plus a hidden status tool."""
+"""Environment for agents that call tools."""
 
 from __future__ import annotations
 
 import asyncio
 import json
-from typing import Any, Dict, List, Optional, Sequence, Set, Tuple
+from typing import Sequence
 
-from openrlhf_agent.utils.types import Action, ToolCall
+from openrlhf_agent.utils.types import Action, Message, ToolCall
 from openrlhf_agent.agentkit.environments.base import Environment
 from openrlhf_agent.agentkit.tools import ToolBase
 
 
-SYSTEM_PROMPT = """
+DEFAULT_PROMPT = """
 You are a helpful assistant.
 """.strip()
 
@@ -22,127 +22,74 @@ class FunctionCallEnvironment(Environment):
     def __init__(
         self,
         *,
-        tools: Optional[Sequence[ToolBase]] = None,
-        system_prompt: Optional[str] = None,
-        max_steps: int = 9999,
+        tools: Sequence[ToolBase] | None = None,
+        system_prompt: str | None = None,
+        max_steps: int | None = None,
     ) -> None:
         super().__init__(
-            tools=tools or [],
-            system_prompt=system_prompt or SYSTEM_PROMPT,
+            tools=tools if tools is not None else [],
+            system_prompt=system_prompt if system_prompt is not None else DEFAULT_PROMPT,
             max_steps=max_steps,
         )
 
-    async def step(self, action: Action) -> Tuple[List[str], bool]:
-        observations: List[str] = []
-        terminated = False
-        tool_calls = action.tool_calls or []
+    async def step(self, action: Action) -> tuple[list[str | Message], bool]:
+        """Apply one assistant action and return its observations."""
 
-        if action.refusal:
-            # Handle a parsing or refusal error from the model.
-            observations.append(
-                self._internal_message(
-                    code="parse_error",
-                    message=action.refusal,
-                    hint="Wrap tool calls in the tool call tags or reply with plain text only.",
+        self.step_index += 1
+        if action.error:
+            # Return malformed model output so the model can retry.
+            observations = [
+                Message(
+                    role="user",
+                    content=(
+                        f"Invalid response: {action.error} "
+                        "Use the tool-call format or reply with plain text."
+                    ),
                 )
+            ]
+        elif not action.tool_calls:
+            return [], True
+        else:
+            observations = await asyncio.gather(
+                *(self._run_tool_call(call) for call in action.tool_calls)
             )
 
-        else:
-            # If there are no tool calls, treat this as the final reply.
-            if not tool_calls:
-                terminated = True
+        # Stop at the configured limit. None means unlimited steps.
+        reached_limit = self.max_steps is not None and self.step_index >= self.max_steps
+        return observations, reached_limit
 
-            # Run tool calls if they exist.
-            else:
-                observations.extend(await self._run_tool_calls(tool_calls))
-
-        # Bump the step counter and enforce the max step limit.
-        self._step_index += 1
-        if self._step_index >= self.max_steps:
-            terminated = True
-
-        return observations, terminated
-
-    async def _run_tool_calls(self, tool_calls: Sequence[ToolCall]) -> List[str]:
-        allowed = set(self.tool_names())
-        tasks = [
-            self._handle_tool_call(tool_call, allowed_tools=allowed) for tool_call in tool_calls
-        ]
-        return await asyncio.gather(*tasks)
-
-    async def _handle_tool_call(
-        self,
-        tool_call: ToolCall,
-        *,
-        allowed_tools: Set[str],
-    ) -> str:
-        if tool_call.refusal:
-            return self._internal_message(
-                code="tool_call_error",
-                message=tool_call.refusal,
-                hint="Fix the tool call JSON payload.",
-                extras={"tool_call_id": tool_call.call_id},
+    async def _run_tool_call(self, tool_call: ToolCall) -> Message:
+        if tool_call.error:
+            return Message(
+                role="tool",
+                content=f"Invalid tool call: {tool_call.error}",
+                tool_call_id=tool_call.call_id,
             )
 
         name = (tool_call.name or "").strip()
         if not name:
-            return self._internal_message(
-                code="missing_tool_name",
-                message="Tool name is required.",
-                hint="Provide a function name inside the tool call payload.",
-                extras={"tool_call_id": tool_call.call_id},
+            return Message(
+                role="tool",
+                content="Tool name is required.",
+                tool_call_id=tool_call.call_id,
             )
 
-        if name not in allowed_tools:
-            return self._internal_message(
-                code="invalid_tool",
-                message=f"Tool '{name}' is not available.",
-                hint="Choose one of the allowed tools.",
-                extras={"tool_call_id": tool_call.call_id},
-            )
-
-        arguments = tool_call.arguments or {}
-        if not isinstance(arguments, dict):
-            return self._internal_message(
-                code="invalid_arguments",
-                message="Tool arguments must be a JSON object.",
-                hint="Use key/value pairs when building tool arguments.",
-                extras={"tool_call_id": tool_call.call_id},
+        if name not in self.tools:
+            available_tools = ", ".join(self.tools) or "none"
+            return Message(
+                role="tool",
+                content=f"Unknown tool '{name}'. Available tools: {available_tools}.",
+                tool_call_id=tool_call.call_id,
             )
 
         try:
             outcome = await self.execute_tool(call=tool_call, context={})
-        except Exception as exc:  # pragma: no cover - defensive guard
-            return self._internal_message(
-                code="tool_runtime_error",
-                message=f"Tool '{name}' raised an exception.",
-                hint="Revise the arguments.",
-                extras={
-                    "tool_call_id": tool_call.call_id,
-                    "exception": str(exc),
-                },
+        except Exception as error:
+            return Message(
+                role="tool",
+                content=f"Tool '{name}' failed: {error}. Revise the arguments.",
+                tool_call_id=tool_call.call_id,
             )
 
-        return str(outcome)
-
-    def _internal_message(
-        self,
-        *,
-        code: str,
-        message: str,
-        hint: Optional[str] = None,
-        tool: Optional[str] = None,
-        extras: Optional[Dict[str, Any]] = None,
-    ) -> str:
-        payload: Dict[str, Any] = {
-            "ok": False,
-            "error": {"code": code, "message": message},
-            "allowed_tools": self.tool_names(),
-        }
-        if hint:
-            payload["hint"] = hint
-        if tool:
-            payload["tool"] = tool
-        if extras:
-            payload.update(extras)
-        return json.dumps(payload, ensure_ascii=False)
+        content = outcome if isinstance(outcome, str) else json.dumps(outcome, ensure_ascii=False)
+        return Message(role="tool", content=content, tool_call_id=tool_call.call_id)

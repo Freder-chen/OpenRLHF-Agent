@@ -2,13 +2,11 @@
 
 from __future__ import annotations
 
-from typing import List, Optional, Tuple
-
 from openrlhf_agent.utils.types import Action
 from openrlhf_agent.agentkit.environments.base import Environment
 
 
-SYSTEM_PROMPT = """
+DEFAULT_PROMPT = """
 You are a helpful assistant.
 """.strip()
 
@@ -19,15 +17,14 @@ class SingleTurnEnvironment(Environment):
     def __init__(
         self,
         *,
-        system_prompt: Optional[str] = None,
+        system_prompt: str | None = None,
     ) -> None:
         super().__init__(
-            tools=[],
-            system_prompt=system_prompt or SYSTEM_PROMPT,
-            max_steps=1
+            system_prompt=system_prompt if system_prompt is not None else DEFAULT_PROMPT,
+            max_steps=1,
         )
 
-    async def step(self, action: Action) -> Tuple[List[str], bool]:
-        self._step_index += 1
+    async def step(self, action: Action) -> tuple[list[str], bool]:
+        self.step_index += 1
 
         return [], True
