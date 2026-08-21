@@ -6,7 +6,7 @@ from abc import ABC, abstractmethod
 from typing import Any, Sequence
 
 from openrlhf_agent.utils.types import Action, Message, ToolCall
-from openrlhf_agent.agentkit.tools import ToolBase
+from openrlhf_agent.agentkit.tools import Tool
 
 
 class Environment(ABC):
@@ -16,7 +16,7 @@ class Environment(ABC):
         self,
         *,
         system_prompt: str,
-        tools: Sequence[ToolBase] = (),
+        tools: Sequence[Tool] = (),
         max_steps: int | None = None,
     ) -> None:
         self.tools = {tool.name: tool for tool in tools}
@@ -33,23 +33,23 @@ class Environment(ABC):
     def tools_manifest(self) -> list[dict[str, Any]]:
         """Return tools in the OpenAI function-calling format."""
 
-        return [tool.openai_tool() for tool in self.tools.values()]
+        return [tool.to_openai_tool() for tool in self.tools.values()]
 
-    async def execute_tool(self, call: ToolCall, context: dict[str, Any]) -> Any:
+    async def execute_tool(self, call: ToolCall) -> Any:
         """Execute one tool invocation."""
 
         if call.name not in self.tools:
             raise KeyError(f"Unknown tool '{call.name}'.")
 
         tool = self.tools[call.name]
-        return await tool.call(context=context, arguments=call.arguments or {})
+        return await tool.call(call.arguments or {})
 
     async def reset(self) -> list[Message]:
-        """Reset one rollout. Stateful async environments may override this."""
+        """Reset one rollout and return its initial messages."""
 
         self.step_index = 0
-        return []
+        return [Message(role="system", content=self.system_prompt)]
 
     @abstractmethod
-    async def step(self, action: Action) -> tuple[list[str | Message], bool]:
+    async def step(self, action: Action) -> tuple[list[Message], bool]:
         """Run one environment transition and return (observations, done)."""

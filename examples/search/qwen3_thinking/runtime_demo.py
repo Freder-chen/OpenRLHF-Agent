@@ -1,10 +1,10 @@
 import asyncio
 
-from openrlhf_agent.backends import OpenAIEngine
+from openrlhf_agent.backends import VLLMCompletionBackend
 from openrlhf_agent.agentkit.runtime import AgentRuntime
-from openrlhf_agent.agentkit.environments import FunctionCallEnvironment, SingleTurnEnvironment
-from openrlhf_agent.agentkit.protocols import Qwen3ThinkingProtocol, Qwen3InstructProtocol
-from openrlhf_agent.agentkit.tools import PrivilegedFeedbackTool, WikiSearchTool, ThinkTool, CommentaryTool
+from openrlhf_agent.agentkit.environments import FunctionCallEnvironment
+from openrlhf_agent.backends.openai.vllm.protocols import Qwen3Protocol
+from openrlhf_agent.agentkit.tools import WikiSearchTool
 
 RETRIEVER_URL = "http://localhost:8000/retrieve"
 BASE_URL = "http://localhost:8009/v1"
@@ -25,13 +25,16 @@ You are a helpful assistant.
 
 async def main() -> None:
     agent_runtime = AgentRuntime(
-        protocol=Qwen3ThinkingProtocol(), # qwen3-thinking
-        engine=OpenAIEngine(base_url=BASE_URL, api_key=API_KEY, model=MODEL),
+        backend=VLLMCompletionBackend(
+            base_url=BASE_URL,
+            api_key=API_KEY,
+            model=MODEL,
+            protocol=Qwen3Protocol(enable_thinking=True),
+        ),
         environment=FunctionCallEnvironment(
             system_prompt=SYSTEM_PROMPT,
             tools=[WikiSearchTool(base_url=RETRIEVER_URL)],
         ),
-        max_model_len=32768,
     )
     messages = [{"role": "user", "content": "What did the technical device made by the british aeronautical engineer during the second world war do?"}]
     async for message in agent_runtime.run_steps(messages):

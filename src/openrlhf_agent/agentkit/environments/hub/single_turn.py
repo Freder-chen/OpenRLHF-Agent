@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from openrlhf_agent.utils.types import Action
+from openrlhf_agent.utils.types import Action, Message
 from openrlhf_agent.agentkit.environments.base import Environment
 
 
@@ -24,7 +24,7 @@ class SingleTurnEnvironment(Environment):
             max_steps=1,
         )
 
-    async def step(self, action: Action) -> tuple[list[str], bool]:
+    async def step(self, action: Action) -> tuple[list[Message], bool]:
         self.step_index += 1
 
         return [], True

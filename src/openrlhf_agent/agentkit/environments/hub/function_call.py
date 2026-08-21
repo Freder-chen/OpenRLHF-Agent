@@ -8,7 +8,7 @@ from typing import Sequence
 
 from openrlhf_agent.utils.types import Action, Message, ToolCall
 from openrlhf_agent.agentkit.environments.base import Environment
-from openrlhf_agent.agentkit.tools import ToolBase
+from openrlhf_agent.agentkit.tools import Tool
 
 
 DEFAULT_PROMPT = """
@@ -22,7 +22,7 @@ class FunctionCallEnvironment(Environment):
     def __init__(
         self,
         *,
-        tools: Sequence[ToolBase] | None = None,
+        tools: Sequence[Tool] | None = None,
         system_prompt: str | None = None,
         max_steps: int | None = None,
     ) -> None:
@@ -32,7 +32,7 @@ class FunctionCallEnvironment(Environment):
             max_steps=max_steps,
         )
 
-    async def step(self, action: Action) -> tuple[list[str | Message], bool]:
+    async def step(self, action: Action) -> tuple[list[Message], bool]:
         """Apply one assistant action and return its observations."""
 
         self.step_index += 1
@@ -83,7 +83,7 @@ class FunctionCallEnvironment(Environment):
             )
 
         try:
-            outcome = await self.execute_tool(call=tool_call, context={})
+            outcome = await self.execute_tool(tool_call)
         except Exception as error:
             return Message(
                 role="tool",

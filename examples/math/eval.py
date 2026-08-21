@@ -6,10 +6,10 @@ from typing import Any, Dict, List
 from datasets import load_dataset, concatenate_datasets
 from tqdm import tqdm
 
-from openrlhf_agent.backends import OpenAIEngine
+from openrlhf_agent.backends import VLLMCompletionBackend
 from openrlhf_agent.agentkit.runtime import AgentRuntime
 from openrlhf_agent.agentkit.environments import SingleTurnEnvironment
-from openrlhf_agent.agentkit.protocols import Qwen3ThinkingProtocol
+from openrlhf_agent.backends.openai.vllm.protocols import Qwen3Protocol
 from openrlhf_agent.agentkit.rewards.result_rewards import MathMatchingReward
 
 _REWARD = MathMatchingReward(correct_score=1.0, miss_score=0.0)
@@ -39,12 +39,10 @@ def normalize_golds(label: Any) -> List[str]:
         return []
 
 
-async def run_one(engine: OpenAIEngine, question: str, labels) -> str:
+async def run_one(backend: VLLMCompletionBackend, question: str, labels) -> str:
     rt = AgentRuntime(
-        engine=engine,
+        backend=backend,
         environment=SingleTurnEnvironment(system_prompt=EVAL_SYSTEM_PROMPT),
-        protocol=Qwen3ThinkingProtocol(),
-        max_model_len=32768,
     )
 
     messages = [{"role": "user", "content": str(question)}]
@@ -55,10 +53,11 @@ async def evaluate(dataset_name, split, n_repeat=1, concurrency=50) -> Dict[str,
     if n_repeat > 1:
         dataset = concatenate_datasets([dataset] * n_repeat)
 
-    engine = OpenAIEngine(
+    backend = VLLMCompletionBackend(
         model="qwen3",
         base_url="http://localhost:8009/v1",
         api_key="empty",
+        protocol=Qwen3Protocol(enable_thinking=True),
     )
     sem = asyncio.Semaphore(concurrency)
     lock = asyncio.Lock()
@@ -77,7 +76,7 @@ async def evaluate(dataset_name, split, n_repeat=1, concurrency=50) -> Dict[str,
             infer_failed = False
 
             try:
-                pred = await run_one(engine, question, golds)
+                pred = await run_one(backend, question, golds)
                 ok = _REWARD.score_response(pred, golds) >= _REWARD.correct_score
             except Exception as e:
                 ok = ""

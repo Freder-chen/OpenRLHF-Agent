@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any, Dict, Iterable, List, Mapping, Optional
+from typing import Any, Dict, Iterable, List, Mapping, Optional, Union
 
 from pydantic import BaseModel
 
@@ -13,15 +13,16 @@ class ToolCall(BaseModel):
     call_id: str
     name: Optional[str] = None
     arguments: Optional[Dict[str, Any]] = None
-    refusal: Optional[str] = None
+    error: Optional[str] = None
 
 
 class Message(BaseModel):
     """Single chat turn tracked inside the session memory."""
 
     role: str
-    content: Optional[str] = None
+    content: Optional[Union[str, List[Dict[str, Any]]]] = None
     tool_calls: Optional[List[ToolCall]] = None
+    tool_call_id: Optional[str] = None
     reasoning_content: Optional[str] = None  # used by reasoning-capable backends
 
 
@@ -31,10 +32,14 @@ class Conversation:
     def __init__(self) -> None:
         self._messages: List[Message] = []
 
-    def reset(self, *, system_prompt: str) -> None:
-        """Start a fresh transcript using the provided system prompt."""
+    def reset(
+        self,
+        messages: Iterable[Message | Mapping[str, Any]] = (),
+    ) -> None:
+        """Replace the conversation with the given messages."""
 
-        self._messages = [Message(role="system", content=system_prompt)]
+        self._messages = []
+        self.extend(messages)
 
     def extend(self, messages: Iterable[Message | Mapping[str, Any]]) -> None:
         """Append a list of historical messages."""
@@ -46,7 +51,7 @@ class Conversation:
                 self._messages.append(Message(**message))
 
     def append(self, message: Message) -> None:
-        """Append a message and return it for convenience."""
+        """Append one message."""
 
         self._messages.append(message)
 

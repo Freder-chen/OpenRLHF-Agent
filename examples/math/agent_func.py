@@ -5,7 +5,7 @@ from typing import Any, Dict
 from openrlhf_agent.agentkit.rewards import RewardPipeline
 from openrlhf_agent.agentkit.session import AgentSession
 from openrlhf_agent.agentkit.environments import SingleTurnEnvironment
-from openrlhf_agent.agentkit.protocols import Qwen3ThinkingProtocol
+from openrlhf_agent.backends.openai.vllm.protocols import Qwen3Protocol
 from openrlhf_agent.agentkit.rewards.result_rewards import MathMatchingReward
 
 from openrlhf.utils.agent import AgentInstanceBase, MultiTurnAgentExecutor
@@ -30,9 +30,9 @@ class AgentInstance(AgentInstanceBase):
     def __init__(self, *args, **kwargs):
         self.session = AgentSession(
             environment=SingleTurnEnvironment(system_prompt=TRAIN_SYSTEM_PROMPT),
-            protocol=Qwen3ThinkingProtocol(),
+            protocol=Qwen3Protocol(enable_thinking=True),
             reward_pipeline=RewardPipeline(
-                result_reward=MathMatchingReward(correct_score=1.0, miss_score=0.0)
+                result_rewards=[MathMatchingReward(correct_score=1.0, miss_score=0.0)],
             ),
         )
 

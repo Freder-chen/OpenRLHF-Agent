@@ -1,32 +1,23 @@
-"""Session management for the tool-using agent."""
+"""Completion session used by training and text-generation inference."""
 
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional, Sequence, Union
+from typing import Any, Optional, Sequence
 
-from openrlhf_agent.utils.types import (
-    Message, Conversation,
-    Action, Observation, RewardSample,
-)
+from openrlhf_agent.backends.openai.vllm.protocols import Protocol
+from openrlhf_agent.utils.types import Action, Conversation, Message, Observation
 from openrlhf_agent.agentkit.environments import Environment
-from openrlhf_agent.agentkit.protocols import ChatProtocol
 from openrlhf_agent.agentkit.rewards import RewardPipeline
 
 
-def has_parse_error(action: Action) -> bool:
-    if action.refusal:
-        return True
-    return action.tool_calls and any(call.refusal for call in action.tool_calls)
-
-
 class AgentSession:
-    """Maintains chat history and bridges the protocol with the environment."""
+    """Connect a completion protocol, environment, history, and rewards."""
 
     def __init__(
         self,
         *,
         environment: Environment,
-        protocol: ChatProtocol,
+        protocol: Protocol,
         reward_pipeline: Optional[RewardPipeline] = None,
     ) -> None:
         self.environment = environment
@@ -34,40 +25,25 @@ class AgentSession:
         self.reward_pipeline = reward_pipeline
 
         self.history = Conversation()
-        self._initial_question: List[Message] = []
+        self._initial_question: list[Message] = []
 
-    def _parse_messages(self, payload: Optional[Union[Sequence[Dict[str, Any]], str]]) -> List[Message]:
-        """Reset the chat history and optionally seed prior turns."""
+    async def initialize(
+        self,
+        question: Sequence[dict[str, Any]] | str,
+    ) -> str:
+        """Start a rollout with the environment and user question."""
 
-        if payload is None:
-            return []
+        if isinstance(question, str):
+            self._initial_question = [Message(role="user", content=question)]
+        else:
+            self._initial_question = [Message(**message) for message in question]
 
-        if isinstance(payload, str):
-            parsed_messages = self.protocol.parse_messages_from_completion_text(payload)
-            # TODO(future): parsing completion text currently keeps both the
-            # environment system prompt and the one embedded in the completion,
-            # so we end up with two system messages. Leave the duplication for
-            # now and revisit when prompt seeding is refactored.
-            return parsed_messages if parsed_messages else []
-
-        if isinstance(payload, list):
-            return [Message(**message) for message in payload]
-
-        raise NotImplementedError
-
-    async def initialize(self, payload: Optional[Union[Sequence[Dict[str, Any]], str]] = None) -> str:
-        """Reset environment state and return the first prompt."""
-
-        self.environment.reset_step()
-
-        self._initial_question = self._parse_messages(payload)
-
-        self.history.reset(system_prompt=self.environment.system_prompt)
+        self.history.reset(await self.environment.reset())
         self.history.extend(self._initial_question)
 
-        return self.protocol.render_messages(
+        return self.protocol.render(
             messages=self.history.messages,
-            tools_manifest=self.environment.tools_manifest(),
+            tools=self.environment.tools_manifest(),
             add_generation_prompt=True,
         )
 
@@ -77,31 +53,28 @@ class AgentSession:
         *,
         label: Optional[Any] = None,
         raw_text: Optional[str] = None,
-    ) -> Observation:
+    ) -> tuple[Observation, Optional[float]]:
         """Apply a parsed assistant action to the environment."""
 
         # Action message
-        action_message = Message(
-            role="assistant",
-            content=action.content or None,
-            tool_calls=action.tool_calls or None,
-            reasoning_content=action.reasoning_content or None,
-        )
-        parse_error = has_parse_error(action)
-        if parse_error and not action.tool_calls and raw_text is not None:
+        action_message = action.to_message()
+        action_error = action.error or any(call.error for call in action.tool_calls or [])
+        if action_error and not action.tool_calls and raw_text is not None:
             # Preserve the unparsed text so the user can see what went wrong.
             action_message.content = raw_text
             action_message.reasoning_content = None
         self.history.append(action_message)
 
         # Observation messages
-        obs_list, done = await self.environment.step(action)
-
-        obs_messages = [Message(role="tool", content=obs) for obs in obs_list]
+        obs_messages, done = await self.environment.step(action)
+        self.history.extend(obs_messages)
         if obs_messages:
-            tool_payload = [m.model_dump(exclude_none=True) for m in obs_messages]
-            feedback_text = self.protocol.render_messages(
-                messages=tool_payload,
+            # TODO: Pass multimodal observations through completion training.
+            if any(isinstance(message.content, list) for message in obs_messages):
+                raise TypeError("Completion sessions only support text observations")
+
+            feedback_text = self.protocol.render(
+                messages=[message.model_dump(exclude_none=True) for message in obs_messages],
                 add_generation_prompt=True,
             )
         else:
@@ -110,22 +83,19 @@ class AgentSession:
         # Make observation
         observation = Observation(
             step_index=self.environment.step_index,
-            feedback_messages=[action_message, *obs_messages], # for runtime, with action
+            feedback_messages=[action_message, *obs_messages],  # for runtime, with action
             feedback_text=feedback_text,  # for train, without action
             done=done,
         )
 
         # Reward action
         reward = None
-        if label is not None and self.reward_pipeline:
+        if self.reward_pipeline:
             reward = await self.reward_pipeline.score(
                 action=action,
                 label=label,
                 done=done,
-                sample=RewardSample(
-                    question=self._initial_question,
-                    process_messages=self.history.messages[len(self._initial_question):], # filter system + input
-                ),
+                question=self._initial_question,
             )
 
         return observation, reward
@@ -135,10 +105,10 @@ class AgentSession:
         action_text: str,
         *,
         label: Optional[Any] = None,
-    ) -> Observation:
+    ) -> tuple[Observation, Optional[float]]:
         """Parse a raw model response and forward to `step`."""
 
-        parsed_action = self.protocol.parse_assistant_text(action_text)
+        parsed_action = self.protocol.parse_action(action_text)
         return await self.step(
             parsed_action,
             label=label,

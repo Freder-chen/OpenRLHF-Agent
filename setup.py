@@ -17,6 +17,7 @@ setup(
     python_requires=">=3.10",
     package_dir={"": "src"},
     packages=find_namespace_packages(where="src"),
+    package_data={"openrlhf_agent": ["backends/openai/vllm/protocols/jinja/*.jinja"]},
     install_requires=[
         "httpx>=0.27",
         "openai>=1.40",

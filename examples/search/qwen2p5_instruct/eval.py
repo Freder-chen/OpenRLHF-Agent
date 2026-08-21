@@ -6,10 +6,10 @@ from typing import Any, Dict, List
 from tqdm import tqdm
 from datasets import load_dataset
 
-from openrlhf_agent.backends import OpenAIEngine
+from openrlhf_agent.backends import VLLMCompletionBackend
 from openrlhf_agent.agentkit.runtime import AgentRuntime
 from openrlhf_agent.agentkit.environments import FunctionCallEnvironment
-from openrlhf_agent.agentkit.protocols import Qwen3InstructProtocol
+from openrlhf_agent.backends.openai.vllm.protocols import Qwen3Protocol
 from openrlhf_agent.agentkit.tools import WikiSearchTool
 from openrlhf_agent.agentkit.rewards.result_rewards import SearchMatchingReward
 
@@ -40,15 +40,13 @@ def _coerce_text_list(value: Any) -> List[str]:
         return []
 
 
-async def run_one(engine: OpenAIEngine, question: str, labels) -> str:
+async def run_one(backend: VLLMCompletionBackend, question: str, labels) -> str:
     rt = AgentRuntime(
-        engine=engine,
+        backend=backend,
         environment=FunctionCallEnvironment(
             system_prompt=EVAL_SYSTEM_PROMPT,
             tools=[WikiSearchTool(base_url=RETRIEVER_URL)],
         ),
-        protocol=Qwen3InstructProtocol(),
-        max_model_len=32768,
     )
 
     messages = [{"role": "user", "content": str(question)}]
@@ -57,10 +55,11 @@ async def run_one(engine: OpenAIEngine, question: str, labels) -> str:
 
 async def evaluate(dataset_name, data_dir, split, concurrency=50) -> Dict[str, Any]:
     dataset = load_dataset(dataset_name, data_dir=data_dir, split=split)
-    engine = OpenAIEngine(
+    backend = VLLMCompletionBackend(
         base_url="http://localhost:8009/v1",
         api_key="empty",
         model="qwen3",
+        protocol=Qwen3Protocol(enable_thinking=False),
     )
     sem = asyncio.Semaphore(concurrency)
     lock = asyncio.Lock()
@@ -79,7 +78,7 @@ async def evaluate(dataset_name, data_dir, split, concurrency=50) -> Dict[str, A
             infer_failed = False
 
             try:
-                pred = await run_one(engine, question, golds)
+                pred = await run_one(backend, question, golds)
                 ok = _REWARD.score_response(pred, golds) >= _REWARD.correct_score
             except Exception as e:
                 ok = ""

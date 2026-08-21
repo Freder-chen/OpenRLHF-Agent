@@ -1,87 +1,94 @@
 # OpenRLHF-Agent
 
-> Consistent training and inference stack for building tool-using chat agents on OpenRLHF and vLLM.
+OpenRLHF-Agent is a small runtime for training and running tool-using agents.
 
-OpenRLHF-Agent is a slim runtime for tool-using chat agents. It keeps environment orchestration, chat protocols, and model I/O identical across RL training and production inference.
+It provides the same environments, tools, and message types for:
 
-## Highlights
+- reinforcement learning with OpenRLHF;
+- token-based inference through vLLM Completions;
+- chat inference through OpenAI-compatible Chat Completions or Responses APIs.
 
-- **Training = inference**: the same `AgentSession` drives tool calls, transcript rendering, and rewards in both phases.
-- **Token-in-token-out**: direct token concatenation with no re-tokenization — avoids BPE mismatch issues.
-- **Environment-controlled execution**: environments own tool dispatch, step limits, and termination.
-- **Small surface area**: `AgentSession`, `Environment`, `ChatProtocol`, `LLMEngine`, `AgentRuntime` — easy to audit and extend.
+## Install
 
-## Architecture
+OpenRLHF-Agent requires Python 3.10 or newer.
 
+```bash
+git clone https://github.com/Freder-chen/OpenRLHF-Agent.git
+cd OpenRLHF-Agent
+python -m pip install -e .
 ```
-AgentRuntime (inference)          agent_func (training)
- │                                 │
- ├─ prompt_ids management          ├─ OpenRLHF manages tokens
- │                                 │
- └─ AgentSession                   └─ AgentSession
-     ├─ Conversation                    ├─ Conversation
-     ├─ Environment (tools, step)       ├─ Environment
-     ├─ ChatProtocol (render, parse)    ├─ ChatProtocol
-     └─ RewardPipeline                  └─ RewardPipeline
+
+For training, install the OpenRLHF integration instead:
+
+```bash
+python -m pip install -e ".[openrlhf]"
 ```
 
 ## Quick Start
 
-### Install
+Start a vLLM server:
 
 ```bash
-git clone https://github.com/OpenRLHF/OpenRLHF-Agent.git
-cd OpenRLHF-Agent
-pip install -e .
+vllm serve Qwen/Qwen3-4B \
+  --port 8009 \
+  --served-model-name qwen3
 ```
 
-### Run Inference
-
-Start a vLLM endpoint:
-
-```bash
-vllm serve Qwen/Qwen3-4B --port 8009 --served-model-name qwen3
-```
-
-Run the demo:
+Run the math example from the repository root:
 
 ```bash
 python examples/math/runtime_demo.py
 ```
 
-### Train with OpenRLHF
+The example creates a `VLLMCompletionBackend`, a `Qwen3Protocol`, and a `SingleTurnEnvironment`, then runs them through `AgentRuntime`.
 
-```bash
-# Math
-bash examples/math/train_reinforce_agent.sh
+## Choose a Backend
 
-# Search with Qwen2.5 Instruct
-bash examples/search/qwen2.5_instruct/train_reinforce_agent.sh
+Choose by API endpoint, not by server name:
 
-# Search with Qwen3 Thinking
-bash examples/search/qwen3_thinking/train_reinforce_agent.sh
-```
+| Endpoint | Backend | Protocol |
+|---|---|---|
+| `/v1/completions` with vLLM token IDs | `VLLMCompletionBackend` | Required |
+| `/v1/chat/completions` | `OpenAIChatBackend` | Not needed |
+| `/v1/responses` | `OpenAIResponsesBackend` | Not needed |
 
-Each example's adjacent `agent_func.py` exposes `AgentInstance` and
-`AgentExecutor` for OpenRLHF.
-
-## Extend
-
-| Want to... | Do this |
-|---|---|
-| Add a tool | Subclass `ToolBase`, pass to `FunctionCallEnvironment(tools=[...])` |
-| Add a reward | Implement `ResultRewardStrategy` or `ProcessRewardStrategy` |
-| Support a new model format | Subclass `ChatProtocol` |
-| Add a backend | Implement `LLMEngine` (`generate`, `tokenize`) |
+A vLLM server can expose Chat Completions. Use `OpenAIChatBackend` for that endpoint; use `VLLMCompletionBackend` only when the completion and token-ID extensions are needed.
 
 ## Examples
 
-| Directory | Description |
+| Directory | Purpose |
 |---|---|
-| `examples/math/` | Single-turn math inference, evaluation, and training |
-| `examples/search/qwen2.5_instruct/` | Qwen2.5 Instruct search inference, evaluation, and training |
-| `examples/search/qwen3_thinking/` | Qwen3 Thinking search inference, evaluation, and training |
-| `examples/search/local_dense_retriever/` | Local Wiki retriever setup and server |
+| [`examples/math/`](examples/math/) | Math inference, evaluation, and training |
+| [`examples/search/qwen2p5_instruct/`](examples/search/qwen2p5_instruct/) | Search with Qwen2.5 Instruct |
+| [`examples/search/qwen3_thinking/`](examples/search/qwen3_thinking/) | Search with Qwen3 Thinking |
+| [`examples/search/local_dense_retriever/`](examples/search/local_dense_retriever/) | Local Wiki retriever setup |
+| [`examples/robot/libero/`](examples/robot/libero/) | Multimodal LIBERO inference |
+
+Search examples require the [local retriever](examples/search/local_dense_retriever/README.md). The LIBERO example has its own [setup guide](examples/robot/libero/README.md) because its simulator uses a separate Python 3.8 environment.
+
+## Train with OpenRLHF
+
+Each training directory contains an `agent_func.py` adapter and a launch script:
+
+```bash
+bash examples/math/train_reinforce_agent.sh
+bash examples/search/qwen2p5_instruct/train_reinforce_agent.sh
+bash examples/search/qwen3_thinking/train_reinforce_agent.sh
+```
+
+The adapters receive raw dataset questions and apply their own protocol templates. Do not add OpenRLHF's `--data.apply_chat_template`, or the prompt will be formatted twice.
+
+## Extend
+
+| Goal | Extend |
+|---|---|
+| Add a tool | `Tool` |
+| Add an environment | `Environment` |
+| Add a reward | `ProcessReward` or `ResultReward` |
+| Add a completion format | `Protocol` |
+| Add a model API | `CompletionBackend` or `ChatBackend` |
+
+See [Architecture](docs/ARCHITECTURE.md) for the component boundaries and request flows.
 
 ## License
 

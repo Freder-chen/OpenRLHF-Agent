@@ -1,9 +1,9 @@
 import asyncio
 
-from openrlhf_agent.backends import OpenAIEngine
+from openrlhf_agent.backends import VLLMCompletionBackend
 from openrlhf_agent.agentkit.runtime import AgentRuntime
 from openrlhf_agent.agentkit.environments import SingleTurnEnvironment
-from openrlhf_agent.agentkit.protocols import Qwen3ThinkingProtocol
+from openrlhf_agent.backends.openai.vllm.protocols import Qwen3Protocol
 
 
 EVAL_SYSTEM_PROMPT = """
@@ -20,11 +20,11 @@ You are a helpful assistant.
 
 async def main() -> None:
     agent_runtime = AgentRuntime(
-        protocol=Qwen3ThinkingProtocol(), # qwen3-thinking
-        engine=OpenAIEngine(
+        backend=VLLMCompletionBackend(
             model="qwen3",
             base_url="http://localhost:8009/v1",
-            api_key="empty"
+            api_key="empty",
+            protocol=Qwen3Protocol(enable_thinking=True),
         ),
         environment=SingleTurnEnvironment(system_prompt=EVAL_SYSTEM_PROMPT),
     )

@@ -36,9 +36,9 @@ ROLLOUT_ARGS=(
    --apply_chat_template
    --packing_samples
 
-   --vllm_generate_batch_size 128
-   --rollout_batch_size 128
-   --n_samples_per_prompt 8
+   --vllm_generate_batch_size 32
+   --rollout_batch_size 32
+   --n_samples_per_prompt 32
    --train_batch_size 1024
 
    --use_dynamic_batch
@@ -57,7 +57,7 @@ ENGINE_ARGS=(
    --actor_num_gpus_per_node 8
    --vllm_num_engines 4
    --vllm_tensor_parallel_size 2
-   --vllm_gpu_memory_utilization 0.7
+   --vllm_gpu_memory_utilization 0.9
    --colocate_all_models
    --vllm_enable_sleep
    --deepspeed_enable_sleep

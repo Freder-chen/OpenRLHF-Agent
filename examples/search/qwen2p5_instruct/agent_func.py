@@ -5,7 +5,7 @@ from typing import Any, Dict
 from openrlhf_agent.agentkit.rewards import RewardPipeline
 from openrlhf_agent.agentkit.session import AgentSession
 from openrlhf_agent.agentkit.environments import FunctionCallEnvironment
-from openrlhf_agent.agentkit.protocols import Qwen3InstructProtocol
+from openrlhf_agent.backends.openai.vllm.protocols import Qwen3Protocol
 from openrlhf_agent.agentkit.rewards.result_rewards import SearchMatchingReward
 from openrlhf_agent.agentkit.rewards.process_rewards import ToolFormatReward
 from openrlhf_agent.agentkit.tools import WikiSearchTool
@@ -40,13 +40,17 @@ class AgentInstance(AgentInstanceBase):
                 tools=[WikiSearchTool(base_url=RETRIEVER_URL)],
                 max_steps=MAX_AGENT_STEPS,
             ),
-            protocol=Qwen3InstructProtocol(),
+            protocol=Qwen3Protocol(enable_thinking=False),
             reward_pipeline=RewardPipeline(
-                process_reward=ToolFormatReward(penalty=-0.1),
-                result_reward=SearchMatchingReward(
-                    correct_score=1.0, format_score=0.1, miss_score=0.0
-                ),
-            )
+                process_rewards=[ToolFormatReward(penalty=-0.1)],
+                result_rewards=[
+                    SearchMatchingReward(
+                        correct_score=1.0,
+                        format_score=0.1,
+                        miss_score=0.0,
+                    ),
+                ],
+            ),
         )
 
     async def reset(self, states: dict, **kwargs):
