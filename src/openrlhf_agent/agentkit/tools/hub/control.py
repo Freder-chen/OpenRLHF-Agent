@@ -2,37 +2,43 @@
 
 from __future__ import annotations
 
-from typing import Any, Dict
+from typing import Any
 
-from openrlhf_agent.agentkit.tools.base import ToolBase
+from openrlhf_agent.agentkit.tools.base import Tool
 
 
-class ThinkTool(ToolBase):
+class ThinkTool(Tool):
     """Concise reasoning visible to the user."""
 
     name = "think"
     description = "Use this tool to think a step before acting."
-    parameters: Dict[str, Any] = {
+    parameters: dict[str, Any] = {
         "type": "object",
         "properties": {
             "thought": {
                 "type": "string",
-                "description": "A concrete reasoning step with specific details: what you found, what it means, what to do next.",
+                "description": (
+                    "A concrete reasoning step: what you found, what it means, "
+                    "and what to do next."
+                ),
             }
         },
         "required": ["thought"],
     }
 
-    async def call(self, *, context: Dict[str, Any], arguments: Dict[str, Any]) -> str:
+    async def call(self, arguments: dict[str, Any]) -> str:
+        thought = arguments.get("thought")
+        if not isinstance(thought, str) or not thought.strip():
+            raise ValueError("thought must be a non-empty string")
         return ""
 
 
-class CommentaryTool(ToolBase):
+class CommentaryTool(Tool):
     """Emit a brief progress update visible to the user."""
 
     name = "commentary"
     description = "Send a short progress update to the user while you continue working."
-    parameters: Dict[str, Any] = {
+    parameters: dict[str, Any] = {
         "type": "object",
         "properties": {
             "message": {
@@ -43,16 +49,19 @@ class CommentaryTool(ToolBase):
         "required": ["message"],
     }
 
-    async def call(self, *, context: Dict[str, Any], arguments: Dict[str, Any]) -> str:
+    async def call(self, arguments: dict[str, Any]) -> str:
+        message = arguments.get("message")
+        if not isinstance(message, str) or not message.strip():
+            raise ValueError("message must be a non-empty string")
         return ""
 
 
-class FinalTool(ToolBase):
+class FinalTool(Tool):
     """Explicitly mark the final response to the user."""
 
     name = "final"
     description = "Submit your final answer to the user. Use this when you are done."
-    parameters: Dict[str, Any] = {
+    parameters: dict[str, Any] = {
         "type": "object",
         "properties": {
             "response": {
@@ -63,8 +72,8 @@ class FinalTool(ToolBase):
         "required": ["response"],
     }
 
-    async def call(self, *, context: Dict[str, Any], arguments: Dict[str, Any]) -> str:
-        response = str(arguments.get("response", "")).strip()
-        if not response:
-            return "InputValidationError: The required parameter `response` must be a non-empty string."
-        return response
+    async def call(self, arguments: dict[str, Any]) -> str:
+        response = arguments.get("response")
+        if not isinstance(response, str) or not response.strip():
+            raise ValueError("response must be a non-empty string")
+        return response.strip()

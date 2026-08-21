@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
-from typing import Any, Dict, Mapping, Sequence
+from typing import Any, Mapping
 
-from openrlhf_agent.agentkit.tools import ToolBase
+import httpx
+
+from openrlhf_agent.agentkit.tools.base import Tool
 
 
-class WikiSearchTool(ToolBase):
+class WikiSearchTool(Tool):
     """Query a wiki-style retriever and return formatted passages."""
 
     name = "wiki_search"
@@ -17,7 +19,7 @@ class WikiSearchTool(ToolBase):
     MAX_TOPK = 10
     DEFAULT_TOPK = 3
 
-    parameters: Dict[str, Any] = {
+    parameters: dict[str, Any] = {
         "type": "object",
         "properties": {
             "query": {"type": "string", "description": "Search query."},
@@ -33,72 +35,57 @@ class WikiSearchTool(ToolBase):
     }
 
     def __init__(self, *, base_url: str, timeout: float = 600.0):
-        self.retriever_url = base_url
-        self.timeout = float(timeout)
+        self.base_url = base_url
+        self.timeout = timeout
 
-    @classmethod
-    def _parse_topk(cls, value: Any) -> int:
-        try:
-            topk = int(value)
-        except (TypeError, ValueError):
-            topk = cls.DEFAULT_TOPK
-        return max(cls.MIN_TOPK, min(cls.MAX_TOPK, topk))
+    async def call(self, arguments: dict[str, Any]) -> str:
+        # Validate arguments.
+        query = arguments.get("query")
+        if not isinstance(query, str) or not query.strip():
+            raise ValueError("query must be a non-empty string")
 
-    def _format_passages(self, passages: Sequence[Mapping[str, Any]]) -> str:
-        """Format a list of retrieved passages into a readable string."""
-        blocks: list[str] = []
+        topk = arguments.get("topk", self.DEFAULT_TOPK)
+        if isinstance(topk, bool) or not isinstance(topk, int):
+            raise ValueError("topk must be an integer")
+        if not self.MIN_TOPK <= topk <= self.MAX_TOPK:
+            raise ValueError(f"topk must be between {self.MIN_TOPK} and {self.MAX_TOPK}")
 
-        for i, passage in enumerate(passages, start=1):
-            # Passages may contain {"document": {"contents": "..."}}, ignore any "score" fields.
-            document = passage.get("document") or {}
+        # Query the retriever.
+        request = {
+            "queries": [query.strip()],
+            "topk": topk,
+            "return_scores": True,
+        }
+        async with httpx.AsyncClient(timeout=self.timeout) as client:
+            response = await client.post(self.base_url, json=request)
+            response.raise_for_status()
+
+        payload = response.json()
+        results = payload.get("result") if isinstance(payload, dict) else None
+        if not isinstance(results, list) or not results:
+            raise RuntimeError("Retriever returned invalid results")
+
+        passages = results[0]
+        if not isinstance(passages, list):
+            raise RuntimeError("Retriever returned invalid passages")
+
+        # Format passages for the model.
+        blocks = []
+        for index, passage in enumerate(passages, start=1):
+            if not isinstance(passage, Mapping):
+                raise RuntimeError("Retriever returned an invalid passage")
+            document = passage.get("document")
+            if not isinstance(document, Mapping):
+                raise RuntimeError("Retriever returned an invalid document")
+
             content = str(document.get("contents") or "").strip()
-
-            header = f"Doc {i}"
-            if not content:
-                blocks.append(header)
-                continue
-
             lines = content.splitlines()
             title = lines[0].strip() if lines else ""
-            body = "\n".join(lines[1:]).strip() if len(lines) > 1 else ""
+            body = "\n".join(lines[1:]).strip()
 
+            header = f"Doc {index}"
             if title:
                 header += f" — {title}"
-            blocks.append(f"{header}\n{body}".rstrip() if body else header)
+            blocks.append(f"{header}\n{body}" if body else header)
 
-        return "\n\n".join(blocks).strip()
-
-    async def call(self, *, context: Dict[str, Any], arguments: Dict[str, Any]) -> str:
-        import httpx
-
-        query = str(arguments.get("query", "")).strip()
-        if not query:
-            return "Missing required argument: `query`."
-
-        topk = self._parse_topk(arguments.get("topk"))
-
-        request_payload = {"queries": [query], "topk": topk, "return_scores": True}
-
-        try:
-            async with httpx.AsyncClient(timeout=self.timeout) as client:
-                response = await client.post(self.retriever_url, json=request_payload)
-                response.raise_for_status()
-                response_data = response.json()
-
-            results = response_data.get("result")
-            if not isinstance(results, list) or not results:
-                return "No results returned by retriever."
-
-            # Server usually returns: {"result": [[...docs...]]} for one query
-            passages = results[0]
-            if not isinstance(passages, list):
-                return "Unexpected retriever response format: `result[0]` is not a list."
-
-            return self._format_passages(passages) or "No passages found."
-
-        except httpx.TimeoutException:
-            return f"Request timed out after {self.timeout:.1f}s."
-        except httpx.HTTPStatusError as exc:
-            return f"Request failed with HTTP {exc.response.status_code}."
-        except Exception as exc:
-            return f"Request failed: {exc}"
+        return "\n\n".join(blocks) or "No passages found."

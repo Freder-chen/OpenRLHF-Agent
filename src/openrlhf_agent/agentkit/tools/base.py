@@ -1,19 +1,19 @@
-"""Abstract base class for environment tools."""
+"""Base class for tools."""
 
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from typing import Any, Dict
+from typing import Any
 
 
-class ToolBase(ABC):
-    """Minimal function-style tool definition."""
+class Tool(ABC):
+    """A function that an agent can call."""
 
     name: str
     description: str
-    parameters: Dict[str, Any]
+    parameters: dict[str, Any]
 
-    def openai_tool(self) -> Dict[str, Any]:
+    def to_openai_tool(self) -> dict[str, Any]:
         """Return a schema that matches OpenAI's function tool format."""
 
         return {
@@ -26,10 +26,5 @@ class ToolBase(ABC):
         }
 
     @abstractmethod
-    async def call(self, *, context: Dict[str, Any], arguments: Dict[str, Any]) -> str:
-        """Execute the tool and return a string payload."""
-
-        raise NotImplementedError
-
-
-__all__ = ["ToolBase"]
+    async def call(self, arguments: dict[str, Any]) -> Any:
+        """Execute the tool and return its result."""
