@@ -29,6 +29,7 @@ htmlcov/
 .pytest_cache/
 
 # IDEs / editors
+.claude/
 .idea/
 .vscode/
 *.iml
