@@ -1,14 +1,13 @@
-"""Base abstraction for process reward strategies."""
+"""Base class for process rewards."""
 
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from typing import Any, Optional
 
 from openrlhf_agent.utils.types import Action
 
 
-class ProcessRewardStrategy(ABC):
+class ProcessReward(ABC):
     """Scores intermediate planning/tool steps."""
 
     @abstractmethod
@@ -16,6 +15,5 @@ class ProcessRewardStrategy(ABC):
         self,
         *,
         action: Action,
-        label: Optional[Any],
     ) -> float:
         """Return the reward associated with the latest tool usage."""

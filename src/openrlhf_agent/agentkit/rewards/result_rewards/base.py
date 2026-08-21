@@ -1,14 +1,14 @@
-"""Base abstraction for result reward strategies."""
+"""Base class for result rewards."""
 
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from typing import Any, Optional
+from typing import Any, Sequence
 
-from openrlhf_agent.utils.types import Action, RewardSample
+from openrlhf_agent.utils.types import Action, Message
 
 
-class ResultRewardStrategy(ABC):
+class ResultReward(ABC):
     """Scores the final user-visible reply."""
 
     final_tool_name: str = "final"
@@ -18,32 +18,24 @@ class ResultRewardStrategy(ABC):
         self,
         *,
         action: Action,
-        label: Optional[Any],
-        sample: Optional[RewardSample] = None,
+        label: Any,
+        question: Sequence[Message] = (),
     ) -> float:
         """Return the reward for the assistant's final answer."""
 
-    def extract_final_response(self, action: Action) -> Optional[str]:
+    def extract_final_response(self, action: Action) -> str | None:
         """Return the assistant-visible final answer from an action."""
 
-        final_text = (action.content or "").strip()
-        if final_text and not action.tool_calls:
-            return final_text
+        if not action.tool_calls:
+            return action.content.strip() if action.content else None
 
-        for tool_call in action.tool_calls or []:
-            if tool_call is None:
-                continue
-
-            name = (tool_call.name or "").strip()
-            if name != self.final_tool_name:
+        for tool_call in action.tool_calls:
+            if tool_call.name != self.final_tool_name:
                 continue
 
             arguments = tool_call.arguments or {}
-            if not isinstance(arguments, dict):
-                continue
-
-            response = str(arguments.get("response", "")).strip()
-            if response:
-                return response
+            response = arguments.get("response")
+            if isinstance(response, str) and response.strip():
+                return response.strip()
 
         return None

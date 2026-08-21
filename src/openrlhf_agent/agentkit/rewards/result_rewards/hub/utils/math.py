@@ -1,6 +1,7 @@
-"""Utilities for checking mathematical answer equivalence.
+"""Extract and compare boxed mathematical answers.
 
-Based on https://github.com/agentica-project/deepscaler/blob/e6080ccd974eb64bd3430f0b36108244a6fee330/deepscaler/rewards/math_utils/utils.py
+The equivalence rules are based on DeepScaleR's math reward:
+https://github.com/agentica-project/deepscaler/blob/e6080ccd974eb64bd3430f0b36108244a6fee330/deepscaler/rewards/math_utils/utils.py
 """
 
 from __future__ import annotations
@@ -12,438 +13,343 @@ from pylatexenc import latex2text
 from sympy.parsing import sympy_parser
 
 
-def mathd_normalize_answer(answer: str | None) -> str | None:
-    """Normalize answers following the MathD ruleset."""
+_UNSAFE_SUBSTRINGS = ("^{", "^(")
+_UNSAFE_PATTERNS = (r"\^[0-9]+\^", r"\^[0-9][0-9]+")
+_TUPLE_BRACKETS = "()[]"
+_FRACTION_RE = re.compile(r"-?[0-9]+.?/0*[1-9][0-9]*.?")
+_FORMATTED_COMMA_RE = re.compile(r"(\d),(\d\d\d)($|\D)")
+_UNITS = (
+    "degree",
+    "cm",
+    "centimeter",
+    "meter",
+    "mile",
+    "second",
+    "minute",
+    "hour",
+    "day",
+    "week",
+    "month",
+    "year",
+    "foot",
+    "feet",
+    "inch",
+    "yard",
+)
 
+
+# Public API
+
+
+def answers_match(solution: str, reference: str) -> bool:
+    """Return whether the last boxed answer matches the reference answer."""
+
+    answer = _extract_boxed_answer(solution)
     if answer is None:
-        return None
+        return False
 
-    answer = answer.strip()
-    try:
-        match = re.search(r"^\\text\{(?P<text>.+?)\}$", answer)
-        if match is not None:
-            answer = match.group("text").strip()
-        return _strip_string(answer)
-    except Exception:
-        return answer
+    boxed_reference = _extract_boxed_answer(reference)
+    if boxed_reference is not None:
+        reference = boxed_reference
 
-
-def _strip_string(string: str) -> str:
-    def _fix_fracs(expr: str) -> str:
-        substrs = expr.split("\\frac")
-        new_str = substrs[0]
-        if len(substrs) > 1:
-            substrs = substrs[1:]
-            for substr in substrs:
-                new_str += "\\frac"
-                if substr[0] == "{":
-                    new_str += substr
-                else:
-                    try:
-                        assert len(substr) >= 2
-                    except Exception:
-                        return expr
-                    a = substr[0]
-                    b = substr[1]
-                    if b != "{":
-                        if len(substr) > 2:
-                            post_substr = substr[2:]
-                            new_str += "{" + a + "}{" + b + "}" + post_substr
-                        else:
-                            new_str += "{" + a + "}{" + b + "}"
-                    else:
-                        if len(substr) > 2:
-                            post_substr = substr[2:]
-                            new_str += "{" + a + "}" + b + post_substr
-                        else:
-                            new_str += "{" + a + "}" + b
-        return new_str
-
-    def _fix_a_slash_b(expr: str) -> str:
-        if len(expr.split("/")) != 2:
-            return expr
-
-        a = expr.split("/")[0]
-        b = expr.split("/")[1]
-        try:
-            a = int(a)
-            b = int(b)
-            assert expr == f"{a}/{b}"
-            new_string = "\\frac{" + str(a) + "}{" + str(b) + "}"
-            return new_string
-        except Exception:
-            return expr
-
-    def _remove_right_units(expr: str) -> str:
-        if "\\text{ " in expr:
-            splits = expr.split("\\text{ ")
-            assert len(splits) == 2
-            return splits[0]
-        return expr
-
-    def _fix_sqrt(expr: str) -> str:
-        if "\\sqrt" not in expr:
-            return expr
-        splits = expr.split("\\sqrt")
-        new_string = splits[0]
-        for split in splits[1:]:
-            if split[0] != "{":
-                a = split[0]
-                new_substr = "\\sqrt{" + a + "}" + split[1:]
-            else:
-                new_substr = "\\sqrt" + split
-            new_string += new_substr
-        return new_string
-
-    string = string.replace("\n", "")
-    string = string.replace("\\!", "")
-    string = string.replace("\\\\", "\\")
-    string = string.replace("tfrac", "frac")
-    string = string.replace("dfrac", "frac")
-    string = string.replace("\\left", "")
-    string = string.replace("\\right", "")
-    string = string.replace("^{\\circ}", "")
-    string = string.replace("^\\circ", "")
-    string = string.replace("\\$", "")
-    string = _remove_right_units(string)
-    string = string.replace("\\%", "")
-    string = string.replace("\%", "")
-    string = string.replace(" .", " 0.")
-    string = string.replace("{.", "{0.")
-    if len(string) == 0:
-        return string
-    if string[0] == ".":
-        string = "0" + string
-
-    if len(string.split("=")) == 2:
-        if len(string.split("=")[0]) <= 2:
-            string = string.split("=")[1]
-
-    string = _fix_sqrt(string)
-    string = string.replace(" ", "")
-    string = _fix_fracs(string)
-
-    if string == "0.5":
-        string = "\\frac{1}{2}"
-
-    string = _fix_a_slash_b(string)
-    return string
-
-
-BAD_SUBSTRINGS = ["^{", "^("]
-BAD_REGEXES = [r"\^[0-9]+\^", r"\^[0-9][0-9]+"]
-TUPLE_CHARS = "()[]"
-
-
-def _sympy_parse(expr: str):
-    """Parse an expression with sympy."""
-
-    py_expr = expr.replace("^", "**")
-    return sympy_parser.parse_expr(
-        py_expr,
-        transformations=(
-            sympy_parser.standard_transformations + (sympy_parser.implicit_multiplication_application,)
-        ),
-    )
-
-
-def _parse_latex(expr: str) -> str:
-    """Convert LaTeX to a sympy-friendly expression."""
-
-    expr = expr.replace("\\tfrac", "\\frac")
-    expr = expr.replace("\\dfrac", "\\frac")
-    expr = expr.replace("\\frac", " \\frac")
-    expr = latex2text.LatexNodes2Text().latex_to_text(expr)
-
-    expr = expr.replace("√", "sqrt")
-    expr = expr.replace("π", "pi")
-    expr = expr.replace("∞", "inf")
-    expr = expr.replace("∪", "U")
-    expr = expr.replace("·", "*")
-    expr = expr.replace("×", "*")
-
-    return expr.strip()
-
-
-def _is_float(num: str) -> bool:
-    try:
-        float(num)
+    normalized_answer = _normalize_answer_text(answer)
+    normalized_reference = _normalize_answer_text(reference)
+    if normalized_answer == normalized_reference:
         return True
-    except Exception:
-        return False
+
+    # Use symbolic comparison only when normalized text differs.
+    return _match_sympy(answer, reference)
 
 
-def _is_int(value: float) -> bool:
-    try:
-        return abs(value - int(round(value))) <= 1e-7
-    except Exception:
-        return False
+# Boxed answer extraction
 
 
-def _is_frac(expr: str) -> bool:
-    return bool(re.search(r"^-?[0-9]+.?/0*[1-9][0-9]*.?$", expr))
+def _extract_boxed_answer(text: str) -> str | None:
+    r"""Extract the contents of the last ``\boxed{}`` or ``\fbox{}``."""
 
-
-def _str_is_int(value: str) -> bool:
-    try:
-        value = _strip_properly_formatted_commas(value)
-        value = float(value)
-        return abs(value - int(round(value))) <= 1e-7
-    except Exception:
-        return False
-
-
-def _str_to_int(value: str) -> int:
-    value = value.replace(",", "")
-    value = float(value)
-    return int(value)
-
-
-def _inject_implicit_mixed_number(step: str) -> str:
-    """Automatically make a mixed number evaluable, e.g., 7 3/4 => 7+3/4."""
-
-    pattern = re.compile(r"([0-9]) +([0-9])")
-    step = pattern.sub(r"\1+\2", step)
-    return step
-
-
-def _strip_properly_formatted_commas(expr: str) -> str:
-    pattern = re.compile(r"(\d)(,)(\d\d\d)($|\D)")
-    while True:
-        next_expr = pattern.sub(r"\1\3\4", expr)
-        if next_expr == expr:
-            break
-        expr = next_expr
-    return next_expr
-
-
-def _normalize(expr: str | None) -> str | None:
-    """Normalize answer expressions."""
-
-    if expr is None:
+    command_start = max(text.rfind(r"\boxed"), text.rfind(r"\fbox"))
+    if command_start < 0:
         return None
 
-    match = re.search(r"^\\text\{(?P<text>.+?)\}$", expr)
-    if match is not None:
-        expr = match.group("text")
+    opening_brace = text.find("{", command_start)
+    if opening_brace < 0:
+        return None
 
-    expr = expr.replace("\\%", "%")
-    expr = expr.replace("\\$", "$")
-    expr = expr.replace("$", "")
-    expr = expr.replace("%", "")
-    expr = expr.replace(" or ", " , ")
-    expr = expr.replace(" and ", " , ")
+    depth = 0
+    for index in range(opening_brace, len(text)):
+        if text[index] == "{":
+            depth += 1
+        elif text[index] == "}":
+            depth -= 1
+            if depth == 0:
+                return text[opening_brace + 1 : index]
 
-    expr = expr.replace("million", "*10^6")
-    expr = expr.replace("billion", "*10^9")
-    expr = expr.replace("trillion", "*10^12")
-
-    for unit in [
-        "degree",
-        "cm",
-        "centimeter",
-        "meter",
-        "mile",
-        "second",
-        "minute",
-        "hour",
-        "day",
-        "week",
-        "month",
-        "year",
-        "foot",
-        "feet",
-        "inch",
-        "yard",
-    ]:
-        expr = re.sub(f"{unit}(es)?(s)? *(\\^[0-9]+)?", "", expr)
-    expr = re.sub(r"\^ *\\circ", "", expr)
-
-    if len(expr) > 0 and expr[0] == "{" and expr[-1] == "}":
-        expr = expr[1:-1]
-
-    expr = re.sub(r",\\! *", "", expr)
-    if _is_float(expr) and _is_int(float(expr)):
-        expr = str(int(round(float(expr))))
-    if "\\" in expr:
-        try:
-            expr = _parse_latex(expr)
-        except Exception:
-            pass
-
-    expr = re.sub(r"- *", "-", expr)
-    expr = _inject_implicit_mixed_number(expr)
-    expr = expr.replace(" ", "")
-    expr = expr.replace("{", "")
-    expr = expr.replace("}", "")
-    expr = expr.lower()
-
-    if _str_is_int(expr):
-        expr = str(_str_to_int(expr))
-
-    return expr
+    return None
 
 
-def count_unknown_letters_in_expr(expr: str) -> int:
-    expr = expr.replace("sqrt", "")
-    expr = expr.replace("frac", "")
-    letters_in_expr = {x for x in expr if x.isalpha()}
-    return len(letters_in_expr)
+# String normalization
 
 
-def should_allow_eval(expr: str) -> bool:
-    if count_unknown_letters_in_expr(expr) > 2:
+def _normalize_answer_text(expression: str) -> str:
+    expression = expression.strip()
+    text_match = re.fullmatch(r"\\text\{(.+?)\}", expression)
+    if text_match:
+        expression = text_match.group(1).strip()
+
+    expression = expression.replace("\n", "")
+    expression = expression.replace(r"\!", "")
+    expression = expression.replace("\\\\", "\\")
+    expression = expression.replace("tfrac", "frac")
+    expression = expression.replace("dfrac", "frac")
+    expression = expression.replace(r"\left", "")
+    expression = expression.replace(r"\right", "")
+    expression = expression.replace(r"^{\circ}", "")
+    expression = expression.replace(r"^\circ", "")
+    expression = expression.replace(r"\$", "")
+    if r"\text{ " in expression:
+        expression = expression.split(r"\text{ ", 1)[0]
+    expression = expression.replace(r"\%", "")
+    expression = expression.replace(" .", " 0.")
+    expression = expression.replace("{.", "{0.")
+
+    if not expression:
+        return expression
+    if expression.startswith("."):
+        expression = "0" + expression
+
+    equation = expression.split("=")
+    if len(equation) == 2 and len(equation[0]) <= 2:
+        expression = equation[1]
+
+    expression = _fix_square_roots(expression)
+    expression = expression.replace(" ", "")
+    expression = _fix_fractions(expression)
+
+    if expression == "0.5":
+        expression = r"\frac{1}{2}"
+
+    return _fix_simple_fraction(expression)
+
+
+def _fix_square_roots(expression: str) -> str:
+    parts = expression.split(r"\sqrt")
+    if len(parts) == 1:
+        return expression
+
+    fixed = parts[0]
+    for suffix in parts[1:]:
+        if not suffix:
+            return expression
+        if suffix.startswith("{"):
+            fixed += r"\sqrt" + suffix
+        else:
+            fixed += r"\sqrt{" + suffix[0] + "}" + suffix[1:]
+    return fixed
+
+
+def _fix_fractions(expression: str) -> str:
+    parts = expression.split(r"\frac")
+    if len(parts) == 1:
+        return expression
+
+    fixed = parts[0]
+    for suffix in parts[1:]:
+        fixed += r"\frac"
+        if suffix.startswith("{"):
+            fixed += suffix
+        elif len(suffix) < 2:
+            return expression
+        elif suffix[1] == "{":
+            fixed += "{" + suffix[0] + "}" + suffix[1:]
+        else:
+            fixed += "{" + suffix[0] + "}{" + suffix[1] + "}" + suffix[2:]
+    return fixed
+
+
+def _fix_simple_fraction(expression: str) -> str:
+    parts = expression.split("/")
+    if len(parts) != 2:
+        return expression
+
+    try:
+        numerator, denominator = map(int, parts)
+    except ValueError:
+        return expression
+
+    if expression != f"{numerator}/{denominator}":
+        return expression
+    return rf"\frac{{{numerator}}}{{{denominator}}}"
+
+
+# Symbolic comparison
+
+
+def _match_sympy(answer: str, reference: str) -> bool:
+    answer = _normalize_for_sympy(answer)
+    reference = _normalize_for_sympy(reference)
+
+    if reference == answer:
+        return True
+    if not answer:
         return False
 
-    for bad_string in BAD_SUBSTRINGS:
-        if bad_string in expr:
-            return False
+    reference_parts = _split_tuple(reference)
+    answer_parts = _split_tuple(answer)
+    if len(reference_parts) != len(answer_parts):
+        return False
 
-    for bad_regex in BAD_REGEXES:
-        if re.search(bad_regex, expr) is not None:
+    if len(reference_parts) > 1 and (
+        reference[0] != answer[0] or reference[-1] != answer[-1]
+    ):
+        return False
+
+    for expected, actual in zip(reference_parts, answer_parts):
+        if _FRACTION_RE.fullmatch(expected) and _FRACTION_RE.fullmatch(actual):
+            equal = expected == actual
+        elif _is_integer_text(expected) != _is_integer_text(actual):
+            equal = False
+        else:
+            equal = _are_sympy_equivalent(expected, actual)
+
+        if not equal:
             return False
 
     return True
 
 
-def are_equal_under_sympy(ground_truth_normalized: str, given_normalized: str) -> bool:
-    are_equal = False
+def _normalize_for_sympy(expression: str) -> str:
+    text_match = re.fullmatch(r"\\text\{(.+?)\}", expression)
+    if text_match:
+        expression = text_match.group(1)
+
+    expression = expression.replace(r"\%", "%")
+    expression = expression.replace(r"\$", "$")
+    expression = expression.replace("$", "")
+    expression = expression.replace("%", "")
+    expression = expression.replace(" or ", " , ")
+    expression = expression.replace(" and ", " , ")
+    expression = expression.replace("million", "*10^6")
+    expression = expression.replace("billion", "*10^9")
+    expression = expression.replace("trillion", "*10^12")
+
+    for unit in _UNITS:
+        expression = re.sub(rf"{unit}(es)?(s)? *(\^[0-9]+)?", "", expression)
+    expression = re.sub(r"\^ *\\circ", "", expression)
+
+    if expression.startswith("{") and expression.endswith("}"):
+        expression = expression[1:-1]
+
+    expression = re.sub(r",\\! *", "", expression)
     try:
-        expr = f"({ground_truth_normalized})-({given_normalized})"
-        if should_allow_eval(expr):
-            sympy_diff = _sympy_parse(expr)
-            simplified = sympy.simplify(sympy_diff)
-            if simplified == 0:
-                are_equal = True
-    except Exception:
+        number = float(expression)
+    except ValueError:
         pass
-    return are_equal
+    else:
+        if _is_integer(number):
+            expression = str(int(round(number)))
+
+    if "\\" in expression:
+        try:
+            expression = _latex_to_text(expression)
+        except Exception:
+            pass
+
+    expression = re.sub(r"- *", "-", expression)
+    expression = re.sub(r"([0-9]) +([0-9])", r"\1+\2", expression)
+    expression = expression.replace(" ", "")
+    expression = expression.replace("{", "")
+    expression = expression.replace("}", "")
+    expression = expression.lower()
+
+    if _is_integer_text(expression):
+        expression = str(int(float(expression.replace(",", ""))))
+
+    return expression
 
 
-def split_tuple(expr: str) -> list[str]:
-    """Split tuple/interval elements while handling formatted commas."""
+def _latex_to_text(expression: str) -> str:
+    expression = expression.replace(r"\tfrac", r"\frac")
+    expression = expression.replace(r"\dfrac", r"\frac")
+    expression = expression.replace(r"\frac", r" \frac")
+    expression = latex2text.LatexNodes2Text().latex_to_text(expression)
 
-    expr = _strip_properly_formatted_commas(expr)
-    if len(expr) == 0:
+    replacements = {
+        "√": "sqrt",
+        "π": "pi",
+        "∞": "inf",
+        "∪": "U",
+        "·": "*",
+        "×": "*",
+    }
+    for source, target in replacements.items():
+        expression = expression.replace(source, target)
+    return expression.strip()
+
+
+def _split_tuple(expression: str) -> list[str]:
+    expression = _strip_formatted_commas(expression)
+    if not expression:
         return []
-    if (
-        len(expr) > 2
-        and expr[0] in TUPLE_CHARS
-        and expr[-1] in TUPLE_CHARS
-        and all([ch not in expr[1:-1] for ch in TUPLE_CHARS])
-    ):
-        elems = [elem.strip() for elem in expr[1:-1].split(",")]
-    else:
-        elems = [expr]
-    return elems
+
+    is_tuple = (
+        len(expression) > 2
+        and expression[0] in _TUPLE_BRACKETS
+        and expression[-1] in _TUPLE_BRACKETS
+        and all(char not in expression[1:-1] for char in _TUPLE_BRACKETS)
+    )
+    if not is_tuple:
+        return [expression]
+    return [item.strip() for item in expression[1:-1].split(",")]
 
 
-def last_boxed_only_string(string: str) -> str | None:
-    idx = string.rfind("\\boxed")
-    if idx < 0:
-        idx = string.rfind("\\fbox")
-        if idx < 0:
-            return None
+def _are_sympy_equivalent(expected: str, actual: str) -> bool:
+    difference = f"({expected})-({actual})"
+    if not _is_safe_to_evaluate(difference):
+        return False
 
-    i = idx
-    right_brace_idx = None
-    num_left_braces_open = 0
-    while i < len(string):
-        if string[i] == "{":
-            num_left_braces_open += 1
-        if string[i] == "}":
-            num_left_braces_open -= 1
-            if num_left_braces_open == 0:
-                right_brace_idx = i
-                break
-        i += 1
-
-    if right_brace_idx is None:
-        retval = None
-    else:
-        retval = string[idx : right_brace_idx + 1]
-
-    return retval
-
-
-def remove_boxed(value: str) -> str | None:
-    left = "\\boxed{"
     try:
-        assert value[: len(left)] == left
-        assert value[-1] == "}"
-        return value[len(left) : -1]
+        parsed = sympy_parser.parse_expr(
+            difference.replace("^", "**"),
+            transformations=(
+                sympy_parser.standard_transformations
+                + (sympy_parser.implicit_multiplication_application,)
+            ),
+        )
+        return sympy.simplify(parsed) == 0
     except Exception:
-        return None
-
-
-def extract_boxed_answer(solution: str) -> str | None:
-    """Extract the answer from inside a LaTeX \\boxed{} command."""
-
-    solution = last_boxed_only_string(solution)
-    solution = remove_boxed(solution) if solution is not None else None
-    return solution
-
-
-def grade_answer_sympy(given_answer: str, ground_truth: str) -> bool:
-    ground_truth_normalized = _normalize(ground_truth)
-    given_normalized = _normalize(given_answer)
-
-    if ground_truth_normalized is None:
         return False
 
-    if ground_truth_normalized == given_normalized:
-        return True
 
-    if not given_normalized:
+def _is_safe_to_evaluate(expression: str) -> bool:
+    letters = expression.replace("sqrt", "").replace("frac", "")
+    if len({char for char in letters if char.isalpha()}) > 2:
+        return False
+    if any(text in expression for text in _UNSAFE_SUBSTRINGS):
+        return False
+    return not any(re.search(pattern, expression) for pattern in _UNSAFE_PATTERNS)
+
+
+# Number helpers
+
+
+def _is_integer(value: float) -> bool:
+    try:
+        return abs(value - int(round(value))) <= 1e-7
+    except (OverflowError, ValueError):
         return False
 
-    ground_truth_elems = split_tuple(ground_truth_normalized)
-    given_elems = split_tuple(given_normalized)
 
-    if len(ground_truth_elems) > 1 and (
-        ground_truth_normalized[0] != given_normalized[0] or ground_truth_normalized[-1] != given_normalized[-1]
-    ):
-        is_correct = False
-    elif len(ground_truth_elems) != len(given_elems):
-        is_correct = False
-    else:
-        is_correct = False
-        for ground_truth_elem, given_elem in zip(ground_truth_elems, given_elems, strict=False):
-            if _is_frac(ground_truth_elem) and _is_frac(given_elem):
-                is_correct = ground_truth_elem == given_elem
-            elif _str_is_int(ground_truth_elem) != _str_is_int(given_elem):
-                is_correct = False
-            else:
-                is_correct = are_equal_under_sympy(ground_truth_elem, given_elem)
-            if not is_correct:
-                break
-
-    return is_correct
-
-
-def grade_answer_mathd(given_answer: str, ground_truth: str) -> bool:
-    ground_truth_normalized_mathd = mathd_normalize_answer(ground_truth)
-    given_answer_normalized_mathd = mathd_normalize_answer(given_answer)
-
-    return ground_truth_normalized_mathd == given_answer_normalized_mathd
-
-
-def extract_answer(passage: str) -> str | None:
-    if "\\boxed" in passage:
-        return extract_boxed_answer(passage)
-    return None
-
-
-def grade_answer_verl(solution_str: str, ground_truth: str) -> bool:
-    if ground_truth is None:
+def _is_integer_text(value: str) -> bool:
+    try:
+        number = float(_strip_formatted_commas(value))
+    except ValueError:
         return False
+    return _is_integer(number)
 
-    ground_truth = str(ground_truth)
-    if "\\boxed" in ground_truth:
-        ground_truth = extract_answer(ground_truth) or ground_truth
 
-    given_answer = extract_answer(solution_str)
-    if given_answer is None:
-        return False
-
-    return grade_answer_mathd(given_answer, ground_truth) or grade_answer_sympy(given_answer, ground_truth)
+def _strip_formatted_commas(expression: str) -> str:
+    while True:
+        cleaned = _FORMATTED_COMMA_RE.sub(r"\1\2\3", expression)
+        if cleaned == expression:
+            return expression
+        expression = cleaned

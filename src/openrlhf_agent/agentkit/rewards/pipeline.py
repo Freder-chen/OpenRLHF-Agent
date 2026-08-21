@@ -2,46 +2,50 @@
 
 from __future__ import annotations
 
-from typing import Any, Optional
+from typing import Any, Sequence
 
-from openrlhf_agent.utils.types import Action, RewardSample
+from openrlhf_agent.utils.types import Action, Message
 
-from .process_rewards.base import ProcessRewardStrategy
-from .result_rewards.base import ResultRewardStrategy
+from .process_rewards.base import ProcessReward
+from .result_rewards.base import ResultReward
 
 
 class RewardPipeline:
-    """Combines optional process/result reward components."""
+    """Combine process and result rewards for one rollout."""
 
     def __init__(
         self,
         *,
-        process_reward: Optional[ProcessRewardStrategy] = None,
-        result_reward: Optional[ResultRewardStrategy] = None,
+        process_rewards: Sequence[ProcessReward] = (),
+        result_rewards: Sequence[ResultReward] = (),
     ) -> None:
-        self._process_reward = process_reward
-        self._result_reward = result_reward
-
-        assert (
-            self._process_reward is not None or self._result_reward is not None
-        ), "RewardPipeline requires at least one reward strategy"
+        if not process_rewards and not result_rewards:
+            raise ValueError("RewardPipeline requires at least one reward")
+        self.process_rewards = list(process_rewards)
+        self.result_rewards = list(result_rewards)
 
     async def score(
         self,
         *,
         action: Action,
-        label: Optional[Any],
+        label: Any,
         done: bool,
-        sample: Optional[RewardSample] = None,
+        question: Sequence[Message] = (),
     ) -> float:
         """Compute a scalar reward for the latest action."""
 
-        reward = 0.0
+        if label is None:
+            raise ValueError("label is required to score a trajectory")
 
-        if self._process_reward and not done:
-            reward += await self._process_reward.score(action=action, label=label)
+        if done:
+            scores = [
+                await reward.score(action=action, label=label, question=question)
+                for reward in self.result_rewards
+            ]
+        else:
+            scores = [
+                await reward.score(action=action)
+                for reward in self.process_rewards
+            ]
 
-        if self._result_reward and done:
-            reward += await self._result_reward.score(action=action, label=label, sample=sample)
-
-        return reward
+        return sum(scores)
