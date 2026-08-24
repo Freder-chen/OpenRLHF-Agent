@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from typing import Any
 from urllib.parse import quote, urlparse
 
@@ -56,7 +57,7 @@ class JinaSearchTool(Tool):
             raise ValueError("api_key is required")
         self.api_key = api_key.strip()
 
-    async def call(self, arguments: dict[str, Any]) -> list[dict[str, Any]]:
+    async def call(self, arguments: dict[str, Any]) -> str:
         query = arguments.get("query")
         if not isinstance(query, str) or not query.strip():
             raise ValueError("query must be a non-empty string")
@@ -71,11 +72,14 @@ class JinaSearchTool(Tool):
             raise RuntimeError("Jina returned invalid search results")
 
         keys = ("title", "url", "description", "publishedTime")
-        return [
-            {key: item.get(key) for key in keys}
-            for item in results
-            if isinstance(item, dict)
-        ]
+        return json.dumps(
+            [
+                {key: item.get(key) for key in keys}
+                for item in results
+                if isinstance(item, dict)
+            ],
+            ensure_ascii=False,
+        )
 
 
 class JinaReadTool(Tool):
@@ -100,7 +104,7 @@ class JinaReadTool(Tool):
             raise ValueError("api_key is required")
         self.api_key = api_key.strip()
 
-    async def call(self, arguments: dict[str, Any]) -> dict[str, Any]:
+    async def call(self, arguments: dict[str, Any]) -> str:
         url = arguments.get("url")
         if not isinstance(url, str):
             raise ValueError("url must be a valid http(s) URL")
@@ -118,11 +122,14 @@ class JinaReadTool(Tool):
         if not isinstance(data, dict):
             raise RuntimeError("Jina returned invalid reader data")
 
-        return {
-            "title": data.get("title"),
-            "url": data.get("url") or url,
-            "description": data.get("description"),
-            "publishedTime": data.get("publishedTime"),
-            "warning": data.get("warning"),
-            "content": data.get("content"),
-        }
+        return json.dumps(
+            {
+                "title": data.get("title"),
+                "url": data.get("url") or url,
+                "description": data.get("description"),
+                "publishedTime": data.get("publishedTime"),
+                "warning": data.get("warning"),
+                "content": data.get("content"),
+            },
+            ensure_ascii=False,
+        )

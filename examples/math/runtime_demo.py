@@ -1,9 +1,8 @@
 import asyncio
 
-from openrlhf_agent.backends import VLLMCompletionBackend
-from openrlhf_agent.agentkit.runtime import AgentRuntime
+from openrlhf_agent.model import Qwen3Protocol, VLLMCompletionBackend
+from openrlhf_agent.agentkit import AgentRuntime
 from openrlhf_agent.agentkit.environments import SingleTurnEnvironment
-from openrlhf_agent.backends.openai.vllm.protocols import Qwen3Protocol
 
 
 EVAL_SYSTEM_PROMPT = """
@@ -24,8 +23,8 @@ async def main() -> None:
             model="qwen3",
             base_url="http://localhost:8009/v1",
             api_key="empty",
-            protocol=Qwen3Protocol(enable_thinking=True),
         ),
+        protocol=Qwen3Protocol(enable_thinking=True),
         environment=SingleTurnEnvironment(system_prompt=EVAL_SYSTEM_PROMPT),
     )
     messages = [{"role": "user", "content": "1+1=?"}]

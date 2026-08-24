@@ -2,10 +2,14 @@
 
 from __future__ import annotations
 
-from typing import Any, Optional, Sequence
+from typing import Any, Sequence
 
-from openrlhf_agent.backends.openai.vllm.protocols import Protocol
-from openrlhf_agent.utils.types import Action, Conversation, Message, Observation
+from openrlhf_agent.model.protocols.base import CompletionProtocol, RenderedPrompt
+from openrlhf_agent.utils.types import (
+    Conversation,
+    Message,
+    Observation,
+)
 from openrlhf_agent.agentkit.environments import Environment
 from openrlhf_agent.agentkit.rewards import RewardPipeline
 
@@ -17,8 +21,8 @@ class AgentSession:
         self,
         *,
         environment: Environment,
-        protocol: Protocol,
-        reward_pipeline: Optional[RewardPipeline] = None,
+        protocol: CompletionProtocol,
+        reward_pipeline: RewardPipeline | None = None,
     ) -> None:
         self.environment = environment
         self.protocol = protocol
@@ -27,10 +31,38 @@ class AgentSession:
         self.history = Conversation()
         self._initial_question: list[Message] = []
 
-    async def initialize(
+    def _render_qwen_observation_suffix(
+        self,
+        previous_messages: Sequence[dict[str, Any]],
+    ) -> RenderedPrompt:
+        """Render an observation suffix for the bundled Qwen chat templates."""
+
+        tools = self.environment.tools_manifest()
+        messages = self.history.messages
+        before = self.protocol.render(messages=previous_messages, tools=tools)
+        after = self.protocol.render(
+            messages=messages, tools=tools, add_generation_prompt=True
+        )
+        # Qwen stops before the template's trailing newline.
+        prefix = before.text.removesuffix("\n")
+        separator = before.text[len(prefix) :]
+        if after.text.startswith(prefix):
+            return RenderedPrompt(
+                text=after.text[len(prefix) :],
+                images=after.images[len(before.images) :],
+            )
+
+        feedback = self.protocol.render(
+            messages=messages[len(previous_messages) :],
+            add_generation_prompt=True,
+        )
+        feedback.text = separator + feedback.text
+        return feedback
+
+    async def reset(
         self,
         question: Sequence[dict[str, Any]] | str,
-    ) -> str:
+    ) -> RenderedPrompt:
         """Start a rollout with the environment and user question."""
 
         if isinstance(question, str):
@@ -38,9 +70,9 @@ class AgentSession:
         else:
             self._initial_question = [Message(**message) for message in question]
 
-        self.history.reset(await self.environment.reset())
-        self.history.extend(self._initial_question)
-
+        self.history = Conversation(
+            [*await self.environment.reset(), *self._initial_question]
+        )
         return self.protocol.render(
             messages=self.history.messages,
             tools=self.environment.tools_manifest(),
@@ -49,48 +81,38 @@ class AgentSession:
 
     async def step(
         self,
-        action: Action,
+        action_text: str,
         *,
-        label: Optional[Any] = None,
-        raw_text: Optional[str] = None,
-    ) -> tuple[Observation, Optional[float]]:
-        """Apply a parsed assistant action to the environment."""
+        label: Any = None,
+    ) -> tuple[Observation, float | None]:
+        """Parse and apply one completion."""
 
-        # Action message
+        action = self.protocol.parse_action(action_text)
         action_message = action.to_message()
-        action_error = action.error or any(call.error for call in action.tool_calls or [])
-        if action_error and not action.tool_calls and raw_text is not None:
-            # Preserve the unparsed text so the user can see what went wrong.
-            action_message.content = raw_text
+        if action.error and not action.tool_calls:
+            action_message.content = action_text
             action_message.reasoning_content = None
         self.history.append(action_message)
 
-        # Observation messages
-        obs_messages, done = await self.environment.step(action)
-        self.history.extend(obs_messages)
-        if obs_messages:
-            # TODO: Pass multimodal observations through completion training.
-            if any(isinstance(message.content, list) for message in obs_messages):
-                raise TypeError("Completion sessions only support text observations")
-
-            feedback_text = self.protocol.render(
-                messages=[message.model_dump(exclude_none=True) for message in obs_messages],
-                add_generation_prompt=True,
-            )
-        else:
-            feedback_text = ""
-
-        # Make observation
-        observation = Observation(
-            step_index=self.environment.step_index,
-            feedback_messages=[action_message, *obs_messages],  # for runtime, with action
-            feedback_text=feedback_text,  # for train, without action
-            done=done,
+        history_before_observation = self.history.messages
+        messages, done = await self.environment.step(action)
+        self.history.extend(messages)
+        rendered_feedback = (
+            self._render_qwen_observation_suffix(history_before_observation)
+            if messages
+            else RenderedPrompt(text="")
         )
 
-        # Reward action
+        observation = Observation(
+            step_index=self.environment.step_index,
+            feedback_messages=[action_message, *messages],
+            feedback_text=rendered_feedback.text,
+            done=done,
+            environment_images=rendered_feedback.images,
+        )
+
         reward = None
-        if self.reward_pipeline:
+        if self.reward_pipeline is not None:
             reward = await self.reward_pipeline.score(
                 action=action,
                 label=label,
@@ -99,18 +121,3 @@ class AgentSession:
             )
 
         return observation, reward
-
-    async def step_from_text(
-        self,
-        action_text: str,
-        *,
-        label: Optional[Any] = None,
-    ) -> tuple[Observation, Optional[float]]:
-        """Parse a raw model response and forward to `step`."""
-
-        parsed_action = self.protocol.parse_action(action_text)
-        return await self.step(
-            parsed_action,
-            label=label,
-            raw_text=action_text,
-        )

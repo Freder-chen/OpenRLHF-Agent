@@ -3,9 +3,9 @@ import torch
 from typing import Any, Dict
 
 from openrlhf_agent.agentkit.rewards import RewardPipeline
-from openrlhf_agent.agentkit.session import AgentSession
+from openrlhf_agent.agentkit import AgentSession
 from openrlhf_agent.agentkit.environments import FunctionCallEnvironment
-from openrlhf_agent.backends.openai.vllm.protocols import Qwen3Protocol
+from openrlhf_agent.model import Qwen3Protocol
 from openrlhf_agent.agentkit.rewards.result_rewards import SearchMatchingReward
 from openrlhf_agent.agentkit.rewards.process_rewards import ToolFormatReward
 from openrlhf_agent.agentkit.tools import WikiSearchTool
@@ -54,14 +54,14 @@ class AgentInstance(AgentInstanceBase):
         )
 
     async def reset(self, states: dict, **kwargs):
-        prompt = await self.session.initialize(states.get("observation"))
-        return {"observation": prompt}
+        prompt = await self.session.reset(states.get("observation"))
+        return {"observation": prompt.text}
 
     async def step(self, states: dict, **kwargs) -> Dict[str, Any]:
         action_text: str = states.get("action_text", "")
         label = states.get("label")
 
-        observation, reward = await self.session.step_from_text(action_text, label=label)
+        observation, reward = await self.session.step(action_text, label=label)
         reward = float(reward) if reward is not None else 0.0
 
         done = observation.done

@@ -6,79 +6,82 @@ from typing import Any, AsyncIterator, Sequence
 
 from openrlhf_agent.agentkit.environments import Environment
 from openrlhf_agent.agentkit.session import AgentSession
-from openrlhf_agent.backends import ChatBackend, CompletionBackend
-from openrlhf_agent.utils.types import Conversation, Message
+from openrlhf_agent.model.backends.base import ActionBackend, CompletionBackend
+from openrlhf_agent.model.protocols.base import CompletionProtocol
+from openrlhf_agent.utils.types import Conversation
 
 
 class AgentRuntime:
-    """Run inference with either a completion or chat backend."""
+    """Run inference with either a completion or action backend."""
 
     def __init__(
         self,
-        backend: CompletionBackend | ChatBackend,
+        backend: CompletionBackend | ActionBackend,
         environment: Environment,
+        *,
+        protocol: CompletionProtocol | None = None,
+        max_tokens: int | None = None,
     ) -> None:
         self.backend = backend
         self.environment = environment
+        self.protocol = protocol
+        self.max_tokens = max_tokens
 
     async def _run_completion(
         self,
         backend: CompletionBackend,
+        protocol: CompletionProtocol,
         messages: Sequence[dict[str, Any]],
     ) -> AsyncIterator[dict[str, Any]]:
         session = AgentSession(
             environment=self.environment,
-            protocol=backend.protocol,
+            protocol=protocol,
         )
-        prompt = await session.initialize(messages)
-        prompt_ids = await backend.tokenize(prompt)
 
-        while (
-            self.environment.max_steps is None
-            or self.environment.step_index < self.environment.max_steps
-        ):
-            # Generate and append the next assistant action.
-            action_ids, action_text = await backend.generate(prompt_ids)
-            prompt_ids.extend(action_ids)
+        rendered = await session.reset(messages)
+        token_ids = await backend.tokenize(
+            rendered.text,
+            add_special_tokens=False,
+        )
+        images = rendered.images
+        while True:
+            result = await backend.generate(
+                token_ids,
+                max_tokens=self.max_tokens,
+                images=images,
+            )
+            token_ids.extend(result.token_ids)
 
-            # Execute the action and emit the new messages.
-            observation, _ = await session.step_from_text(action_text)
-            for message in observation.feedback_messages or []:
+            observation, _ = await session.step(result.text)
+            for message in observation.feedback_messages:
                 yield message.model_dump(exclude_none=True)
-
             if observation.done:
                 return
+            token_ids.extend(
+                await backend.tokenize(
+                    observation.feedback_text,
+                    add_special_tokens=False,
+                )
+            )
+            images.extend(observation.environment_images)
 
-            # Append tool feedback before the next generation.
-            if observation.feedback_text:
-                feedback_ids = await backend.tokenize(observation.feedback_text)
-                prompt_ids.extend(feedback_ids)
-
-        yield Message(
-            role="assistant",
-            content="Max steps reached without final response.",
-        ).model_dump(exclude_none=True)
-
-    async def _run_chat(
+    async def _run_action(
         self,
-        backend: ChatBackend,
+        backend: ActionBackend,
         messages: Sequence[dict[str, Any]],
     ) -> AsyncIterator[dict[str, Any]]:
-        history = Conversation()
-        history.reset(await self.environment.reset())
-        history.extend(messages)
+        history = Conversation([*await self.environment.reset(), *messages])
         tools = self.environment.tools_manifest()
 
-        while (
-            self.environment.max_steps is None
-            or self.environment.step_index < self.environment.max_steps
-        ):
-            # Generate and record the next assistant action.
-            action = await backend.generate_chat(history.messages, tools=tools)
+        while True:
+            action = await backend.generate(
+                history.messages,
+                tools=tools,
+                max_tokens=self.max_tokens,
+            )
             action_message = action.to_message()
             history.append(action_message)
 
-            # Execute the action and record its observations.
             observation_messages, done = await self.environment.step(action)
             history.extend(observation_messages)
 
@@ -87,11 +90,6 @@ class AgentRuntime:
             if done:
                 return
 
-        yield Message(
-            role="assistant",
-            content="Max steps reached without final response.",
-        ).model_dump(exclude_none=True)
-
     async def run_steps(
         self,
         messages: Sequence[dict[str, Any]],
@@ -99,11 +97,11 @@ class AgentRuntime:
         """Yield each assistant action and environment observation."""
 
         if isinstance(self.backend, CompletionBackend):
-            runner = self._run_completion(self.backend, messages)
-        elif isinstance(self.backend, ChatBackend):
-            runner = self._run_chat(self.backend, messages)
+            if self.protocol is None:
+                raise ValueError("CompletionBackend requires a CompletionProtocol.")
+            runner = self._run_completion(self.backend, self.protocol, messages)
         else:
-            raise TypeError(f"Unsupported backend: {type(self.backend).__name__}")
+            runner = self._run_action(self.backend, messages)
 
         async for message in runner:
             yield message

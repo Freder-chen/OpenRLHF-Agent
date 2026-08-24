@@ -6,10 +6,9 @@ from typing import Any, Dict, List
 from datasets import load_dataset, concatenate_datasets
 from tqdm import tqdm
 
-from openrlhf_agent.backends import VLLMCompletionBackend
-from openrlhf_agent.agentkit.runtime import AgentRuntime
+from openrlhf_agent.model import Qwen3Protocol, VLLMCompletionBackend
+from openrlhf_agent.agentkit import AgentRuntime
 from openrlhf_agent.agentkit.environments import SingleTurnEnvironment
-from openrlhf_agent.backends.openai.vllm.protocols import Qwen3Protocol
 from openrlhf_agent.agentkit.rewards.result_rewards import MathMatchingReward
 
 _REWARD = MathMatchingReward(correct_score=1.0, miss_score=0.0)
@@ -42,11 +41,13 @@ def normalize_golds(label: Any) -> List[str]:
 async def run_one(backend: VLLMCompletionBackend, question: str, labels) -> str:
     rt = AgentRuntime(
         backend=backend,
+        protocol=Qwen3Protocol(enable_thinking=True),
         environment=SingleTurnEnvironment(system_prompt=EVAL_SYSTEM_PROMPT),
     )
 
     messages = [{"role": "user", "content": str(question)}]
     return await rt.run_final(messages)
+
 
 async def evaluate(dataset_name, split, n_repeat=1, concurrency=50) -> Dict[str, Any]:
     dataset = load_dataset(dataset_name, split=split)
@@ -57,7 +58,6 @@ async def evaluate(dataset_name, split, n_repeat=1, concurrency=50) -> Dict[str,
         model="qwen3",
         base_url="http://localhost:8009/v1",
         api_key="empty",
-        protocol=Qwen3Protocol(enable_thinking=True),
     )
     sem = asyncio.Semaphore(concurrency)
     lock = asyncio.Lock()
@@ -101,7 +101,7 @@ async def evaluate(dataset_name, split, n_repeat=1, concurrency=50) -> Dict[str,
         "metrics": {"exact_match": exact_match},
     }
 
-    
+
 async def main() -> None:
     # Datasets:
     #   AIME 2024: https://huggingface.co/datasets/HuggingFaceH4/aime_2024
@@ -123,7 +123,9 @@ async def main() -> None:
         dataset_dirname = dataset["dirname"]
         dataset_split = dataset["split"]
         n_repeat = dataset.get("n_repeat", 1)
-        result = await evaluate(dataset_dirname, dataset_split, n_repeat=n_repeat, concurrency=48)
+        result = await evaluate(
+            dataset_dirname, dataset_split, n_repeat=n_repeat, concurrency=48
+        )
 
         dataset_name = dataset_dirname.split("/")[-1]
         print(f"{dataset_name}: {result}")

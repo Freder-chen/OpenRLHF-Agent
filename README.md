@@ -1,12 +1,14 @@
 # OpenRLHF-Agent
 
-OpenRLHF-Agent is a small runtime for training and running tool-using agents.
+OpenRLHF-Agent is a small runtime for running and training tool-using agents. It keeps model-server APIs separate from environments, tools, and rewards.
 
-It provides the same environments, tools, and message types for:
+It provides:
 
-- reinforcement learning with OpenRLHF;
-- token-based inference through vLLM Completions;
-- chat inference through OpenAI-compatible Chat Completions or Responses APIs.
+- token-in/token-out backends for vLLM and SGLang;
+- OpenAI-compatible Chat Completions and Responses backends;
+- Qwen completion templates and tool-call parsers;
+- ordered text and image observations for VLMs;
+- OpenRLHF training examples.
 
 ## Install
 
@@ -18,59 +20,77 @@ cd OpenRLHF-Agent
 python -m pip install -e .
 ```
 
-For training, install the OpenRLHF integration instead:
-
-```bash
-python -m pip install -e ".[openrlhf]"
-```
+Model servers and example-specific dependencies must be installed separately.
 
 ## Quick Start
 
-Start a vLLM server:
+The math demo uses `VLLMCompletionBackend` and requires a vLLM build that exposes `/inference/v1/generate`, `/tokenize`, and `/detokenize`.
 
 ```bash
 vllm serve Qwen/Qwen3-4B \
   --port 8009 \
   --served-model-name qwen3
-```
 
-Run the math example from the repository root:
-
-```bash
 python examples/math/runtime_demo.py
 ```
 
-The example creates a `VLLMCompletionBackend`, a `Qwen3Protocol`, and a `SingleTurnEnvironment`, then runs them through `AgentRuntime`.
+The example creates one runtime from a backend, protocol, and environment:
 
-## Choose a Backend
+```python
+runtime = AgentRuntime(
+    backend=VLLMCompletionBackend(
+        model="qwen3",
+        base_url="http://localhost:8009/v1",
+        api_key="empty",
+    ),
+    protocol=Qwen3Protocol(enable_thinking=True),
+    environment=SingleTurnEnvironment(system_prompt="You are a helpful assistant."),
+)
 
-Choose by API endpoint, not by server name:
+answer = await runtime.run_final([{"role": "user", "content": "1+1=?"}])
+```
 
-| Endpoint | Backend | Protocol |
+## How It Works
+
+| Component | Responsibility |
+|---|---|
+| Backend | Communicate with one model API |
+| Completion protocol | Render a checkpoint template and parse generated text |
+| Environment | Own tools, observations, step count, and termination |
+| Runtime | Connect the backend to the environment until the rollout finishes |
+
+Completion backends consume rendered text or token IDs and require a protocol when used by `AgentRuntime`. Action backends consume structured messages directly and do not use a protocol.
+
+## Backends
+
+Choose a backend by API endpoint, not by server product.
+
+| Backend | Endpoint | Use when |
 |---|---|---|
-| `/v1/completions` with vLLM token IDs | `VLLMCompletionBackend` | Required |
-| `/v1/chat/completions` | `OpenAIChatBackend` | Not needed |
-| `/v1/responses` | `OpenAIResponsesBackend` | Not needed |
+| `VLLMCompletionBackend` | `/inference/v1/generate` | You need vLLM-generated token IDs and optional logprobs |
+| `SGLangCompletionBackend` | `/generate` | You need SGLang-generated token IDs, optional logprobs, or native image transport |
+| `OpenAIChatBackend` | `/v1/chat/completions` | The server accepts structured chat messages and tools |
+| `OpenAIResponsesBackend` | `/v1/responses` | The server supports Responses reasoning, tools, and structured input |
 
-A vLLM server can expose Chat Completions. Use `OpenAIChatBackend` for that endpoint; use `VLLMCompletionBackend` only when the completion and token-ID extensions are needed.
+A vLLM server can also expose Chat Completions. Use `OpenAIChatBackend` for that endpoint and `VLLMCompletionBackend` for the token-in/token-out endpoint.
+
+## Completion Protocols
+
+| Protocol | Tool-call format | Images |
+|---|---|---|
+| `Qwen3Protocol` | JSON inside `<tool_call>` | No |
+| `Qwen3p5Protocol` | Nested function and parameter tags | Yes |
+| `Qwen3p6Protocol` | Nested function and parameter tags | Yes |
+| `Qwen3p8Protocol` | Nested function and parameter tags | Yes |
 
 ## Examples
 
-| Directory | Purpose |
-|---|---|
-| [`examples/math/`](examples/math/) | Math inference, evaluation, and training |
-| [`examples/search/`](examples/search/) | Qwen2.5 and Qwen3 search examples with local retrieval |
-| [`examples/robot/`](examples/robot/) | Multimodal robot inference |
+| Example | Purpose | Requirements |
+|---|---|---|
+| [`examples/math/`](examples/math/) | Math inference, evaluation, and OpenRLHF training | Model server; training scripts assume Ray and multiple GPUs |
+| [`examples/search/`](examples/search/) | Tool-using search inference, evaluation, and training | Start the [local retriever](examples/search/local_dense_retriever/README.md) first |
 
-## Train with OpenRLHF
-
-Each training directory contains an `agent_func.py` adapter and a launch script:
-
-```bash
-bash examples/math/train_reinforce_agent.sh
-bash examples/search/qwen2p5_instruct/train_reinforce_agent.sh
-bash examples/search/qwen3_thinking/train_reinforce_agent.sh
-```
+The OpenRLHF adapters live in each example's `agent_func.py`. Training launch scripts are starting points and should be adjusted for the available cluster and model.
 
 ## Extend
 
@@ -79,10 +99,10 @@ bash examples/search/qwen3_thinking/train_reinforce_agent.sh
 | Add a tool | `Tool` |
 | Add an environment | `Environment` |
 | Add a reward | `ProcessReward` or `ResultReward` |
-| Add a completion format | `Protocol` |
-| Add a model API | `CompletionBackend` or `ChatBackend` |
+| Add a completion format | `CompletionProtocol` |
+| Add a model API | `CompletionBackend` or `ActionBackend` |
 
-See [Architecture](docs/ARCHITECTURE.md) for the component boundaries and request flows.
+See [Architecture](docs/ARCHITECTURE.md) for component ownership, rollout flow, and multimodal boundaries.
 
 ## License
 

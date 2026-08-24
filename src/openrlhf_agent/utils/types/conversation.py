@@ -23,22 +23,17 @@ class Message(BaseModel):
     content: Optional[Union[str, List[Dict[str, Any]]]] = None
     tool_calls: Optional[List[ToolCall]] = None
     tool_call_id: Optional[str] = None
-    reasoning_content: Optional[str] = None  # used by reasoning-capable backends
+    reasoning_content: Optional[str] = None
 
 
 class Conversation:
     """Stores chat messages and knows how to render them."""
 
-    def __init__(self) -> None:
-        self._messages: List[Message] = []
-
-    def reset(
+    def __init__(
         self,
         messages: Iterable[Message | Mapping[str, Any]] = (),
     ) -> None:
-        """Replace the conversation with the given messages."""
-
-        self._messages = []
+        self._messages: List[Message] = []
         self.extend(messages)
 
     def extend(self, messages: Iterable[Message | Mapping[str, Any]]) -> None:

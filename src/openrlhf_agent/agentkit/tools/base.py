@@ -26,5 +26,8 @@ class Tool(ABC):
         }
 
     @abstractmethod
-    async def call(self, arguments: dict[str, Any]) -> Any:
-        """Execute the tool and return its result."""
+    async def call(
+        self,
+        arguments: dict[str, Any],
+    ) -> str | list[dict[str, Any]]:
+        """Execute the tool and return message content."""

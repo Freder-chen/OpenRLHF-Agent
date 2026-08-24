@@ -3,7 +3,11 @@ from setuptools import find_namespace_packages, setup
 
 
 BASE_DIR = Path(__file__).parent
-README = (BASE_DIR / "README.md").read_text(encoding="utf-8") if (BASE_DIR / "README.md").exists() else ""
+README = (
+    (BASE_DIR / "README.md").read_text(encoding="utf-8")
+    if (BASE_DIR / "README.md").exists()
+    else ""
+)
 
 
 setup(
@@ -17,10 +21,14 @@ setup(
     python_requires=">=3.10",
     package_dir={"": "src"},
     packages=find_namespace_packages(where="src"),
-    package_data={"openrlhf_agent": ["backends/openai/vllm/protocols/jinja/*.jinja"]},
+    package_data={
+        "openrlhf_agent": ["model/protocols/qwen/templates/*.jinja"],
+    },
     install_requires=[
         "httpx>=0.27",
-        "openai>=1.40",
+        "jinja2>=3.1",
+        "openai>=2.0",
+        "pydantic>=2.0",
         "pylatexenc>=2.10",
         "sympy>=1.12",
     ],

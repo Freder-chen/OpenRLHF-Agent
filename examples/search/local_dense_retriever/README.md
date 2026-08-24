@@ -1,6 +1,5 @@
 ## Setting up Local Dense Retriever ([Search-R1](https://github.com/PeterGriffinJin/Search-R1) Local Search (WIKI))
 
-
 This guide walks through setting up the **Search-R1 local dense retriever** backend and verifying it through a simple terminal test.
 
 ### 1. Create Retriever Conda Environment
@@ -26,7 +25,9 @@ pip install uvicorn fastapi
 ```
 
 ### 2. Download Index and Corpus
+
 Note: The local retrieval files are large. You'll need approximately 60-70 GB for download and 132 GB after extraction. Make sure you have sufficient disk space.
+
 ```bash
 # Set your save path
 save_path=./Index

@@ -35,7 +35,10 @@ class Environment(ABC):
 
         return [tool.to_openai_tool() for tool in self.tools.values()]
 
-    async def execute_tool(self, call: ToolCall) -> Any:
+    async def execute_tool(
+        self,
+        call: ToolCall,
+    ) -> str | list[dict[str, Any]]:
         """Execute one tool invocation."""
 
         if call.name not in self.tools:

@@ -8,7 +8,9 @@ license = {text = "Apache-2.0"}
 authors = [{name = "freder"}]
 dependencies = [
   "httpx>=0.27",
-  "openai>=1.40",
+  "jinja2>=3.1",
+  "openai>=2.0",
+  "pydantic>=2.0",
   "pylatexenc>=2.10",
   "sympy>=1.12",
 ]
@@ -20,9 +22,6 @@ dev = [
   "ruff>=0.5",
   "mypy>=1.10",
 ]
-openrlhf = [
-  "openrlhf>=0.9",
-]
 
 [build-system]
 requires = ["setuptools>=68"]
@@ -30,3 +29,9 @@ build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.setuptools.package-data]
+openrlhf_agent = ["model/protocols/qwen/templates/*.jinja"]
+
+[tool.ruff.lint.per-file-ignores]
+"src/**/__init__.py" = ["F401"]

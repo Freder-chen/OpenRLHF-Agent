@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-from typing import List, Optional
+from dataclasses import dataclass, field
+from typing import Any, List, Optional
 
 from .conversation import Message, ToolCall
 
@@ -33,6 +33,7 @@ class Observation:
     """Outcome produced after applying an action to the environment."""
 
     step_index: int
-    feedback_messages: Optional[List[Message]] = None
-    feedback_text: str | None = None
+    feedback_messages: List[Message] = field(default_factory=list)
+    feedback_text: str = ""
     done: bool = False
+    environment_images: list[Any] = field(default_factory=list)

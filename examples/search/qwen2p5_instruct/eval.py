@@ -6,10 +6,9 @@ from typing import Any, Dict, List
 from tqdm import tqdm
 from datasets import load_dataset
 
-from openrlhf_agent.backends import VLLMCompletionBackend
-from openrlhf_agent.agentkit.runtime import AgentRuntime
+from openrlhf_agent.model import Qwen3Protocol, VLLMCompletionBackend
+from openrlhf_agent.agentkit import AgentRuntime
 from openrlhf_agent.agentkit.environments import FunctionCallEnvironment
-from openrlhf_agent.backends.openai.vllm.protocols import Qwen3Protocol
 from openrlhf_agent.agentkit.tools import WikiSearchTool
 from openrlhf_agent.agentkit.rewards.result_rewards import SearchMatchingReward
 
@@ -43,6 +42,7 @@ def _coerce_text_list(value: Any) -> List[str]:
 async def run_one(backend: VLLMCompletionBackend, question: str, labels) -> str:
     rt = AgentRuntime(
         backend=backend,
+        protocol=Qwen3Protocol(enable_thinking=False),
         environment=FunctionCallEnvironment(
             system_prompt=EVAL_SYSTEM_PROMPT,
             tools=[WikiSearchTool(base_url=RETRIEVER_URL)],
@@ -59,7 +59,6 @@ async def evaluate(dataset_name, data_dir, split, concurrency=50) -> Dict[str, A
         base_url="http://localhost:8009/v1",
         api_key="empty",
         model="qwen3",
-        protocol=Qwen3Protocol(enable_thinking=False),
     )
     sem = asyncio.Semaphore(concurrency)
     lock = asyncio.Lock()
@@ -119,7 +118,9 @@ async def main() -> None:
     for dataset in datasets:
         data_dir = dataset["data_dir"]
         dataset_split = dataset["split"]
-        result = await evaluate(FLASHRAG_DATASET_REPO, data_dir, dataset_split, concurrency=48)
+        result = await evaluate(
+            FLASHRAG_DATASET_REPO, data_dir, dataset_split, concurrency=48
+        )
 
         print(f"{data_dir}: {result}")
 

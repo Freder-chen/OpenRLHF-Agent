@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-import json
 from typing import Sequence
 
 from openrlhf_agent.utils.types import Action, Message, ToolCall
@@ -28,7 +27,9 @@ class FunctionCallEnvironment(Environment):
     ) -> None:
         super().__init__(
             tools=tools if tools is not None else [],
-            system_prompt=system_prompt if system_prompt is not None else DEFAULT_PROMPT,
+            system_prompt=system_prompt
+            if system_prompt is not None
+            else DEFAULT_PROMPT,
             max_steps=max_steps,
         )
 
@@ -83,7 +84,7 @@ class FunctionCallEnvironment(Environment):
             )
 
         try:
-            outcome = await self.execute_tool(tool_call)
+            content = await self.execute_tool(tool_call)
         except Exception as error:
             return Message(
                 role="tool",
@@ -91,5 +92,4 @@ class FunctionCallEnvironment(Environment):
                 tool_call_id=tool_call.call_id,
             )
 
-        content = outcome if isinstance(outcome, str) else json.dumps(outcome, ensure_ascii=False)
         return Message(role="tool", content=content, tool_call_id=tool_call.call_id)
