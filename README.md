@@ -87,10 +87,10 @@ A vLLM server can also expose Chat Completions. Use `OpenAIChatBackend` for that
 
 | Example | Purpose | Requirements |
 |---|---|---|
-| [`examples/math/`](examples/math/) | Math inference, evaluation, and OpenRLHF training | Model server; training scripts assume Ray and multiple GPUs |
+| [`examples/math/`](examples/math/) | Math inference, evaluation, and OpenRLHF or Molt training | Model server; training scripts assume Ray and multiple GPUs |
 | [`examples/search/`](examples/search/) | Tool-using search inference, evaluation, and training | Start the [local retriever](examples/search/local_dense_retriever/README.md) first |
 
-The OpenRLHF adapters live in each example's `agent_func.py`. Training launch scripts are starting points and should be adjusted for the available cluster and model.
+Training adapters live beside their launch scripts. Adjust the scripts for the available cluster and model.
 
 ## Extend
 
