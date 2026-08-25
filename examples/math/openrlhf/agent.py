@@ -1,14 +1,15 @@
+"""OpenRLHF adapter for the Qwen3 math environment."""
+
+from typing import Any
+
 import torch
+from openrlhf.utils.agent import AgentInstanceBase, MultiTurnAgentExecutor
 
-from typing import Any, Dict
-
-from openrlhf_agent.agentkit.rewards import RewardPipeline
 from openrlhf_agent.agentkit import AgentSession
 from openrlhf_agent.agentkit.environments import SingleTurnEnvironment
-from openrlhf_agent.model import Qwen3Protocol
+from openrlhf_agent.agentkit.rewards import RewardPipeline
 from openrlhf_agent.agentkit.rewards.result_rewards import MathMatchingReward
-
-from openrlhf.utils.agent import AgentInstanceBase, MultiTurnAgentExecutor
+from openrlhf_agent.model import Qwen3Protocol
 
 
 TRAIN_SYSTEM_PROMPT = """
@@ -27,40 +28,43 @@ Rules:
 
 
 class AgentInstance(AgentInstanceBase):
+    """One isolated math rollout."""
+
     def __init__(self, *args, **kwargs):
         self.session = AgentSession(
             environment=SingleTurnEnvironment(system_prompt=TRAIN_SYSTEM_PROMPT),
             protocol=Qwen3Protocol(enable_thinking=True),
             reward_pipeline=RewardPipeline(
-                result_rewards=[MathMatchingReward(correct_score=1.0, miss_score=0.0)],
+                result_rewards=[MathMatchingReward(correct_score=1.0, miss_score=0.0)]
             ),
         )
 
-    async def reset(self, states: dict, **kwargs):
-        prompt = await self.session.reset(states.get("observation"))
+    async def reset(self, states: dict[str, Any], **kwargs) -> dict[str, str]:
+        prompt = await self.session.reset(states["observation"])
         return {"observation": prompt.text}
 
-    async def step(self, states: dict, **kwargs) -> Dict[str, Any]:
-        action_text: str = states.get("action_text", "")
-        label = states.get("label")
+    async def step(self, states: dict[str, Any], **kwargs) -> dict[str, Any]:
+        observation, reward = await self.session.step(
+            states["action_text"],
+            label=states["label"],
+        )
+        reward = float(reward or 0.0)
 
-        observation, reward = await self.session.step(action_text, label=label)
-        reward = float(reward) if reward is not None else 0.0
-
-        done = True  # observation.done
         return {
             "rewards": torch.tensor(reward),
             "scores": torch.tensor(reward),
-            "environment_feedback": "" if done else observation.feedback_text,
-            "done": done,
-            "sampling_params": states.get("sampling_params", None),
+            "environment_feedback": (
+                "" if observation.done else observation.feedback_text
+            ),
+            "done": observation.done,
             "extra_logs": {
-                "dummy_scores": torch.tensor(reward),
                 "turn_count": torch.tensor(observation.step_index),
             },
         }
 
 
 class AgentExecutor(MultiTurnAgentExecutor):
+    """Entrypoint loaded by OpenRLHF rollout workers."""
+
     def __init__(self):
         super().__init__(AgentInstance)

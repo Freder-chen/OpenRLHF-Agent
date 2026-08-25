@@ -38,7 +38,7 @@ def normalize_golds(label: Any) -> List[str]:
         return []
 
 
-async def run_one(backend: VLLMCompletionBackend, question: str, labels) -> str:
+async def run_one(backend: VLLMCompletionBackend, question: str) -> str:
     rt = AgentRuntime(
         backend=backend,
         protocol=Qwen3Protocol(enable_thinking=True),
@@ -54,51 +54,51 @@ async def evaluate(dataset_name, split, n_repeat=1, concurrency=50) -> Dict[str,
     if n_repeat > 1:
         dataset = concatenate_datasets([dataset] * n_repeat)
 
-    backend = VLLMCompletionBackend(
+    async with VLLMCompletionBackend(
         model="qwen3",
         base_url="http://localhost:8009/v1",
         api_key="empty",
-    )
-    sem = asyncio.Semaphore(concurrency)
-    lock = asyncio.Lock()
+    ) as backend:
+        sem = asyncio.Semaphore(concurrency)
+        lock = asyncio.Lock()
 
-    metric_sum = 0.0
-    metric_cnt = 0
-    num_errors = 0
+        metric_sum = 0.0
+        metric_cnt = 0
+        num_errors = 0
 
-    async def run_item(item: Dict[str, Any], pbar: tqdm) -> None:
-        nonlocal metric_sum, metric_cnt, num_errors
+        async def run_item(item: Dict[str, Any], pbar: tqdm) -> None:
+            nonlocal metric_sum, metric_cnt, num_errors
 
-        question = item["problem"]
-        golds = normalize_golds(item["answer"])
+            question = item["problem"]
+            golds = normalize_golds(item["answer"])
 
-        async with sem:
-            infer_failed = False
+            async with sem:
+                infer_failed = False
 
-            try:
-                pred = await run_one(backend, question, golds)
-                ok = _REWARD.score_response(pred, golds) >= _REWARD.correct_score
-            except Exception as e:
-                ok = ""
-                infer_failed = True
-                print(f"Error: {e}")
+                try:
+                    pred = await run_one(backend, question)
+                    ok = _REWARD.score_response(pred, golds) >= _REWARD.correct_score
+                except Exception as e:
+                    ok = False
+                    infer_failed = True
+                    print(f"Error: {e}")
 
-        async with lock:
-            metric_sum += 1.0 if ok else 0.0
-            metric_cnt += 1
-            if infer_failed:
-                num_errors += 1
-            pbar.update(1)
+            async with lock:
+                metric_sum += 1.0 if ok else 0.0
+                metric_cnt += 1
+                if infer_failed:
+                    num_errors += 1
+                pbar.update(1)
 
-    total = len(dataset)
-    with tqdm(total=total, desc="Evaluating") as pbar:
-        await asyncio.gather(*(run_item(it, pbar) for it in dataset))
+        total = len(dataset)
+        with tqdm(total=total, desc="Evaluating") as pbar:
+            await asyncio.gather(*(run_item(it, pbar) for it in dataset))
 
-    exact_match = (metric_sum / metric_cnt) if metric_cnt else 0.0
+    math_match = (metric_sum / metric_cnt) if metric_cnt else 0.0
     return {
         "num_samples": total,
         "num_errors": num_errors,
-        "metrics": {"exact_match": exact_match},
+        "metrics": {"math_match": math_match},
     }
 
 
@@ -124,7 +124,7 @@ async def main() -> None:
         dataset_split = dataset["split"]
         n_repeat = dataset.get("n_repeat", 1)
         result = await evaluate(
-            dataset_dirname, dataset_split, n_repeat=n_repeat, concurrency=48
+            dataset_dirname, dataset_split, n_repeat=n_repeat, concurrency=50
         )
 
         dataset_name = dataset_dirname.split("/")[-1]
