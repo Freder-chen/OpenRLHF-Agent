@@ -1,9 +1,8 @@
-# -*- coding: utf-8 -*-
-
 import asyncio
-from typing import Any, Dict, List
+from argparse import ArgumentParser
+from typing import Any
 
-from datasets import load_dataset, concatenate_datasets
+from datasets import concatenate_datasets, load_dataset
 from tqdm import tqdm
 
 from openrlhf_agent.model import Qwen3Protocol, VLLMCompletionBackend
@@ -26,7 +25,7 @@ You are a helpful assistant.
 """.strip()
 
 
-def normalize_golds(label: Any) -> List[str]:
+def normalize_golds(label: Any) -> list[str]:
     if label is None or label == "":
         return []
     if isinstance(label, (str, int, float)):
@@ -38,21 +37,16 @@ def normalize_golds(label: Any) -> List[str]:
         return []
 
 
-async def run_one(backend: VLLMCompletionBackend, question: str) -> str:
-    rt = AgentRuntime(
-        backend=backend,
-        protocol=Qwen3Protocol(enable_thinking=True),
-        environment=SingleTurnEnvironment(system_prompt=EVAL_SYSTEM_PROMPT),
-    )
-
-    messages = [{"role": "user", "content": str(question)}]
-    return await rt.run_final(messages)
-
-
-async def evaluate(dataset_name, split, n_repeat=1, concurrency=50) -> Dict[str, Any]:
+async def evaluate(
+    dataset_name: str,
+    split: str,
+    *,
+    repeat: int,
+    concurrency: int,
+) -> dict[str, Any]:
     dataset = load_dataset(dataset_name, split=split)
-    if n_repeat > 1:
-        dataset = concatenate_datasets([dataset] * n_repeat)
+    if repeat > 1:
+        dataset = concatenate_datasets([dataset] * repeat)
 
     async with VLLMCompletionBackend(
         model="qwen3",
@@ -60,75 +54,64 @@ async def evaluate(dataset_name, split, n_repeat=1, concurrency=50) -> Dict[str,
         api_key="empty",
     ) as backend:
         sem = asyncio.Semaphore(concurrency)
-        lock = asyncio.Lock()
 
-        metric_sum = 0.0
-        metric_cnt = 0
-        num_errors = 0
-
-        async def run_item(item: Dict[str, Any], pbar: tqdm) -> None:
-            nonlocal metric_sum, metric_cnt, num_errors
-
+        async def run_item(item: dict[str, Any]) -> tuple[bool, bool]:
             question = item["problem"]
             golds = normalize_golds(item["answer"])
 
             async with sem:
-                infer_failed = False
-
                 try:
-                    pred = await run_one(backend, question)
+                    runtime = AgentRuntime(
+                        backend=backend,
+                        protocol=Qwen3Protocol(enable_thinking=True),
+                        environment=SingleTurnEnvironment(system_prompt=EVAL_SYSTEM_PROMPT),
+                    )
+                    pred = await runtime.run_final(
+                        [{"role": "user", "content": str(question)}]
+                    )
                     ok = _REWARD.score_response(pred, golds) >= _REWARD.correct_score
-                except Exception as e:
-                    ok = False
-                    infer_failed = True
-                    print(f"Error: {e}")
-
-            async with lock:
-                metric_sum += 1.0 if ok else 0.0
-                metric_cnt += 1
-                if infer_failed:
-                    num_errors += 1
-                pbar.update(1)
+                except Exception as error:
+                    tqdm.write(f"Error: {error}")
+                    return False, True
+                return ok, False
 
         total = len(dataset)
+        tasks = [run_item(item) for item in dataset]
+        results = []
         with tqdm(total=total, desc="Evaluating") as pbar:
-            await asyncio.gather(*(run_item(it, pbar) for it in dataset))
+            for task in asyncio.as_completed(tasks):
+                results.append(await task)
+                pbar.update(1)
 
-    math_match = (metric_sum / metric_cnt) if metric_cnt else 0.0
+    correct = sum(ok for ok, _ in results)
     return {
         "num_samples": total,
-        "num_errors": num_errors,
-        "metrics": {"math_match": math_match},
+        "num_errors": sum(failed for _, failed in results),
+        "metrics": {"math_match": correct / total if total else 0.0},
     }
 
 
-async def main() -> None:
-    # Datasets:
-    #   AIME 2024: https://huggingface.co/datasets/HuggingFaceH4/aime_2024
-    #   AIME 2025: https://huggingface.co/datasets/MathArena/aime_2025
-    #   AIME 2026: https://huggingface.co/datasets/MathArena/aime_2026
-    #   HMMT Feb 2025: https://huggingface.co/datasets/MathArena/hmmt_feb_2025
-    #   Apex 2025: https://huggingface.co/datasets/MathArena/apex_2025
-    #   Apex Shortlist: https://huggingface.co/datasets/MathArena/apex-shortlist
-    datasets = [
-        # Math: (dataset, split, n_repeat) — n_repeat = runs per problem (avg@n)
-        # {"dirname": "HuggingFaceH4/aime_2024", "split": "train", "n_repeat": 4},
-        # {"dirname": "MathArena/aime_2025", "split": "train", "n_repeat": 4},
-        # {"dirname": "MathArena/aime_2026", "split": "train", "n_repeat": 4},
-        # {"dirname": "MathArena/hmmt_feb_2025", "split": "train", "n_repeat": 4},
-        {"dirname": "MathArena/apex_2025", "split": "train", "n_repeat": 1},
-        # {"dirname": "MathArena/apex-shortlist", "split": "train", "n_repeat": 4},
-    ]
-    for dataset in datasets:
-        dataset_dirname = dataset["dirname"]
-        dataset_split = dataset["split"]
-        n_repeat = dataset.get("n_repeat", 1)
-        result = await evaluate(
-            dataset_dirname, dataset_split, n_repeat=n_repeat, concurrency=50
-        )
+def parse_args():
+    parser = ArgumentParser(description="Evaluate a math model served by vLLM.")
+    parser.add_argument("dataset", nargs="?", default="MathArena/apex_2025")
+    parser.add_argument("--split", default="train")
+    parser.add_argument("--repeat", type=int, default=1, help="Runs per problem")
+    parser.add_argument("--concurrency", type=int, default=50)
+    args = parser.parse_args()
+    if args.repeat < 1 or args.concurrency < 1:
+        parser.error("--repeat and --concurrency must be positive")
+    return args
 
-        dataset_name = dataset_dirname.split("/")[-1]
-        print(f"{dataset_name}: {result}")
+
+async def main() -> None:
+    args = parse_args()
+    result = await evaluate(
+        args.dataset,
+        args.split,
+        repeat=args.repeat,
+        concurrency=args.concurrency,
+    )
+    print(f"{args.dataset.split('/')[-1]}: {result}")
 
 
 if __name__ == "__main__":

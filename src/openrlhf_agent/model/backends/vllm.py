@@ -19,7 +19,7 @@ class VLLMCompletionBackend(CompletionBackend):
         model: str,
         base_url: str,
         api_key: str | None = None,
-        timeout: float = 600.0,
+        timeout: float | None = None,
         transport: httpx.AsyncBaseTransport | None = None,
     ) -> None:
         self.model = model

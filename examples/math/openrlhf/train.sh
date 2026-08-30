@@ -7,7 +7,7 @@ set -euo pipefail
 
 MODEL_PATH="Qwen/Qwen3-4B-Thinking-2507"
 DATASET_PATH="MathArena/arxivmath-training"
-SAVE_PATH="$WORK_DIR/exp/Qwen3-4B-Thinking-ArxivMath"
+SAVE_PATH="$WORK_DIR/exp/Qwen3-4B-Thinking-ArxivMath-openrlhf"
 AGENT_FUNC_PATH="$(realpath "$SCRIPT_DIR/agent.py")"
 
 CKPT_ARGS=(
@@ -49,12 +49,12 @@ ENGINE_ARGS=(
   --train.partial_rollout_enable
 
   --ref.num_nodes 1
-  --ref.num_gpus_per_node 4
+  --ref.num_gpus_per_node 8
   --actor.num_nodes 1
-  --actor.num_gpus_per_node 4
+  --actor.num_gpus_per_node 8
   --actor.gradient_checkpointing_enable
 
-  --vllm.num_engines 4
+  --vllm.num_engines 8
   --vllm.tensor_parallel_size 1
   --vllm.gpu_memory_utilization 0.9
   --vllm.sync_backend nccl
