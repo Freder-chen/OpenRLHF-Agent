@@ -8,6 +8,7 @@ from typing import Any, Mapping, Sequence
 import httpx
 
 from openrlhf_agent.model.backends.base import CompletionBackend, GenerationResult
+from openrlhf_agent.model.protocols.base import CompletionProtocol
 
 
 class VLLMCompletionBackend(CompletionBackend):
@@ -18,13 +19,15 @@ class VLLMCompletionBackend(CompletionBackend):
         *,
         model: str,
         base_url: str,
+        protocol: CompletionProtocol,
         api_key: str | None = None,
         timeout: float | None = None,
         transport: httpx.AsyncBaseTransport | None = None,
     ) -> None:
+        super().__init__(protocol=protocol)
         self.model = model
         self.client = httpx.AsyncClient(
-            base_url=base_url.rstrip("/").removesuffix("/v1"),
+            base_url=base_url,
             headers={"Authorization": f"Bearer {api_key}"} if api_key else None,
             timeout=timeout,
             transport=transport,
@@ -32,7 +35,7 @@ class VLLMCompletionBackend(CompletionBackend):
 
     async def generate(
         self,
-        prompt: str | list[int],
+        token_ids: list[int],
         max_tokens: int | None = None,
         *,
         images: Sequence[Any] | None = None,
@@ -42,9 +45,7 @@ class VLLMCompletionBackend(CompletionBackend):
     ) -> GenerationResult:
         payload: dict[str, Any] = {
             "model": self.model,
-            "token_ids": await self.tokenize(prompt)
-            if isinstance(prompt, str)
-            else prompt,
+            "token_ids": token_ids,
             "sampling_params": {
                 **(sampling_params or {}),
                 "n": 1,

@@ -42,7 +42,6 @@ def _coerce_text_list(value: Any) -> List[str]:
 async def run_one(backend: VLLMCompletionBackend, question: str, labels) -> str:
     rt = AgentRuntime(
         backend=backend,
-        protocol=Qwen3Protocol(enable_thinking=False),
         environment=FunctionCallEnvironment(
             system_prompt=EVAL_SYSTEM_PROMPT,
             tools=[WikiSearchTool(base_url=RETRIEVER_URL)],
@@ -56,9 +55,10 @@ async def run_one(backend: VLLMCompletionBackend, question: str, labels) -> str:
 async def evaluate(dataset_name, data_dir, split, concurrency=50) -> Dict[str, Any]:
     dataset = load_dataset(dataset_name, data_dir=data_dir, split=split)
     backend = VLLMCompletionBackend(
-        base_url="http://localhost:8009/v1",
+        base_url="http://localhost:8009",
         api_key="empty",
         model="qwen3",
+        protocol=Qwen3Protocol(enable_thinking=False),
     )
     sem = asyncio.Semaphore(concurrency)
     lock = asyncio.Lock()

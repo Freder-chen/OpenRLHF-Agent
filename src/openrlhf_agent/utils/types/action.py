@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, List, Optional
+from typing import List, Optional
 
 from .conversation import Message, ToolCall
 
@@ -16,9 +16,13 @@ class Action:
     tool_calls: Optional[List[ToolCall]] = None
     reasoning_content: Optional[str] = None
     error: Optional[str] = None
+    raw_text: Optional[str] = field(default=None, repr=False)
 
     def to_message(self) -> Message:
         """Convert the action into an assistant message."""
+
+        if self.raw_text is not None and self.error and not self.tool_calls:
+            return Message(role="assistant", content=self.raw_text)
 
         return Message(
             role="assistant",
@@ -34,6 +38,10 @@ class Observation:
 
     step_index: int
     feedback_messages: List[Message] = field(default_factory=list)
-    feedback_text: str = ""
     done: bool = False
-    environment_images: list[Any] = field(default_factory=list)
+
+    @property
+    def environment_messages(self) -> List[Message]:
+        """Return environment messages without the leading assistant action."""
+
+        return self.feedback_messages[1:]

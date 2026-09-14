@@ -34,13 +34,13 @@ Rules:
 
 class AgentInstance(AgentInstanceBase):
     def __init__(self, *args, **kwargs):
+        self.protocol = Qwen3Protocol(enable_thinking=True)
         self.session = AgentSession(
             environment=FunctionCallEnvironment(
                 system_prompt=SYSTEM_PROMPT,
                 tools=[WikiSearchTool(base_url=RETRIEVER_URL)],
                 max_steps=MAX_AGENT_STEPS,
             ),
-            protocol=Qwen3Protocol(enable_thinking=True),
             reward_pipeline=RewardPipeline(
                 process_rewards=[ToolFormatReward(penalty=-0.1)],
                 result_rewards=[
@@ -54,21 +54,41 @@ class AgentInstance(AgentInstanceBase):
         )
 
     async def reset(self, states: dict, **kwargs):
-        prompt = await self.session.reset(states.get("observation"))
+        messages = await self.session.reset(states.get("observation"))
+        prompt = self.protocol.render(
+            messages=messages,
+            tools=self.session.environment.tools_manifest(),
+            add_generation_prompt=True,
+        )
         return {"observation": prompt.text}
 
     async def step(self, states: dict, **kwargs) -> Dict[str, Any]:
         action_text: str = states.get("action_text", "")
         label = states.get("label")
 
-        observation, reward = await self.session.step(action_text, label=label)
+        action = self.protocol.parse_action(action_text)
+        observation, reward = await self.session.step(
+            action,
+            label=label,
+        )
         reward = float(reward) if reward is not None else 0.0
 
         done = observation.done
+        feedback_text = ""
+        if not done:
+            environment_messages = [
+                message.model_dump(exclude_none=True)
+                for message in observation.environment_messages
+            ]
+            feedback_text = self.protocol.render_feedback(
+                messages=self.session.history.messages,
+                environment_messages=environment_messages,
+                tools=self.session.environment.tools_manifest(),
+            ).text
         return {
             "rewards": torch.tensor(reward),
             "scores": torch.tensor(reward),
-            "environment_feedback": "" if done else observation.feedback_text,
+            "environment_feedback": feedback_text,
             "done": done,
             "sampling_params": states.get("sampling_params", None),
             "extra_logs": {

@@ -6,6 +6,7 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from typing import Any, Mapping, Sequence
 
+from openrlhf_agent.model.protocols.base import CompletionProtocol, RenderedPrompt
 from openrlhf_agent.utils.types import Action
 
 
@@ -29,12 +30,49 @@ class GenerationResult:
 
 
 class CompletionBackend(ABC):
-    """Backend that generates text from a rendered prompt."""
+    """Backend that renders, generates, and parses completion-model output."""
+
+    def __init__(self, *, protocol: CompletionProtocol) -> None:
+        self.protocol = protocol
+
+    def render_prompt(
+        self,
+        *,
+        messages: Sequence[Mapping[str, Any]],
+        tools: Sequence[Mapping[str, Any]] | None = None,
+    ) -> RenderedPrompt:
+        """Render the initial prompt for this backend's model."""
+
+        return self.protocol.render(
+            messages=messages,
+            tools=tools,
+            add_generation_prompt=True,
+        )
+
+    def render_feedback(
+        self,
+        *,
+        messages: Sequence[Mapping[str, Any]],
+        environment_messages: Sequence[Mapping[str, Any]],
+        tools: Sequence[Mapping[str, Any]] | None = None,
+    ) -> RenderedPrompt:
+        """Render the incremental prompt after an environment transition."""
+
+        return self.protocol.render_feedback(
+            messages=messages,
+            environment_messages=environment_messages,
+            tools=tools,
+        )
+
+    def parse_action(self, text: str) -> Action:
+        """Parse generated text according to this backend's model protocol."""
+
+        return self.protocol.parse_action(text)
 
     @abstractmethod
     async def generate(
         self,
-        prompt: str | list[int],
+        token_ids: list[int],
         max_tokens: int | None = None,
         *,
         images: Sequence[Any] | None = None,
@@ -42,7 +80,7 @@ class CompletionBackend(ABC):
         return_logprobs: bool = False,
         session_id: str | None = None,
     ) -> GenerationResult:
-        """Generate text and exact token metadata.
+        """Generate text and exact token metadata from token IDs.
 
         ``max_tokens=None`` lets the server choose the generation limit. Requested
         logprobs align one-to-one with token IDs. ``session_id`` identifies related

@@ -30,4 +30,4 @@ class Tool(ABC):
         self,
         arguments: dict[str, Any],
     ) -> str | list[dict[str, Any]]:
-        """Execute the tool and return message content."""
+        """Execute the tool and return its content."""

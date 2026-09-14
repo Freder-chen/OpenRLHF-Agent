@@ -21,15 +21,13 @@ class FunctionCallEnvironment(Environment):
     def __init__(
         self,
         *,
-        tools: Sequence[Tool] | None = None,
         system_prompt: str | None = None,
+        tools: Sequence[Tool] | None = None,
         max_steps: int | None = None,
     ) -> None:
         super().__init__(
-            tools=tools if tools is not None else [],
-            system_prompt=system_prompt
-            if system_prompt is not None
-            else DEFAULT_PROMPT,
+            system_prompt=system_prompt or DEFAULT_PROMPT,
+            tools=tools or [],
             max_steps=max_steps,
         )
 
@@ -84,7 +82,7 @@ class FunctionCallEnvironment(Environment):
             )
 
         try:
-            content = await self.execute_tool(tool_call)
+            result = await self.execute_tool(tool_call)
         except Exception as error:
             return Message(
                 role="tool",
@@ -92,4 +90,4 @@ class FunctionCallEnvironment(Environment):
                 tool_call_id=tool_call.call_id,
             )
 
-        return Message(role="tool", content=content, tool_call_id=tool_call.call_id)
+        return Message(role="tool", content=result, tool_call_id=tool_call.call_id)

@@ -14,6 +14,7 @@ from typing import Any
 import httpx
 
 from openrlhf_agent.model.backends.base import CompletionBackend, GenerationResult
+from openrlhf_agent.model.protocols.base import CompletionProtocol
 
 
 class SGLangCompletionBackend(CompletionBackend):
@@ -23,10 +24,12 @@ class SGLangCompletionBackend(CompletionBackend):
         self,
         *,
         base_url: str,
+        protocol: CompletionProtocol,
         api_key: str | None = None,
         timeout: float = 600.0,
         transport: httpx.AsyncBaseTransport | None = None,
     ) -> None:
+        super().__init__(protocol=protocol)
         self.client = httpx.AsyncClient(
             base_url=base_url.rstrip("/").removesuffix("/v1"),
             headers={"Authorization": f"Bearer {api_key}"} if api_key else None,
@@ -36,7 +39,7 @@ class SGLangCompletionBackend(CompletionBackend):
 
     async def generate(
         self,
-        prompt: str | list[int],
+        token_ids: list[int],
         max_tokens: int | None = None,
         *,
         images: Sequence[Any] | None = None,
@@ -47,7 +50,7 @@ class SGLangCompletionBackend(CompletionBackend):
         """Generate with exact token IDs and optional log probabilities."""
 
         payload: dict[str, Any] = {
-            "text" if isinstance(prompt, str) else "input_ids": prompt,
+            "input_ids": token_ids,
             "sampling_params": {
                 **(sampling_params or {}),
                 "n": 1,

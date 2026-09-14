@@ -31,31 +31,31 @@ class AgentInstance(AgentInstanceBase):
     """One isolated math rollout."""
 
     def __init__(self, *args, **kwargs):
+        self.protocol = Qwen3Protocol(enable_thinking=True)
         self.session = AgentSession(
             environment=SingleTurnEnvironment(system_prompt=TRAIN_SYSTEM_PROMPT),
-            protocol=Qwen3Protocol(enable_thinking=True),
             reward_pipeline=RewardPipeline(
                 result_rewards=[MathMatchingReward(correct_score=1.0, miss_score=0.0)]
             ),
         )
 
     async def reset(self, states: dict[str, Any], **kwargs) -> dict[str, str]:
-        prompt = await self.session.reset(states["observation"])
+        prompt = self.protocol.render(
+            messages=await self.session.reset(states["observation"]),
+            tools=self.session.environment.tools_manifest(),
+            add_generation_prompt=True,
+        )
         return {"observation": prompt.text}
 
     async def step(self, states: dict[str, Any], **kwargs) -> dict[str, Any]:
-        observation, reward = await self.session.step(
-            states["action_text"],
-            label=states["label"],
-        )
+        action = self.protocol.parse_action(states["action_text"])
+        observation, reward = await self.session.step(action, label=states["label"])
         reward = float(reward or 0.0)
 
         return {
             "rewards": torch.tensor(reward),
             "scores": torch.tensor(reward),
-            "environment_feedback": (
-                "" if observation.done else observation.feedback_text
-            ),
+            "environment_feedback": "",
             "done": observation.done,
             "extra_logs": {
                 "turn_count": torch.tensor(observation.step_index),

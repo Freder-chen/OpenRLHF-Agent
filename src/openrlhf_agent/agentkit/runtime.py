@@ -7,8 +7,6 @@ from typing import Any, AsyncIterator, Sequence
 from openrlhf_agent.agentkit.environments import Environment
 from openrlhf_agent.agentkit.session import AgentSession
 from openrlhf_agent.model.backends.base import ActionBackend, CompletionBackend
-from openrlhf_agent.model.protocols.base import CompletionProtocol
-from openrlhf_agent.utils.types import Conversation
 
 
 class AgentRuntime:
@@ -19,26 +17,27 @@ class AgentRuntime:
         backend: CompletionBackend | ActionBackend,
         environment: Environment,
         *,
-        protocol: CompletionProtocol | None = None,
         max_tokens: int | None = None,
     ) -> None:
         self.backend = backend
         self.environment = environment
-        self.protocol = protocol
         self.max_tokens = max_tokens
 
     async def _run_completion(
         self,
         backend: CompletionBackend,
-        protocol: CompletionProtocol,
         messages: Sequence[dict[str, Any]],
     ) -> AsyncIterator[dict[str, Any]]:
         session = AgentSession(
             environment=self.environment,
-            protocol=protocol,
         )
 
-        rendered = await session.reset(messages)
+        await session.reset(messages)
+        tools = self.environment.tools_manifest()
+        rendered = backend.render_prompt(
+            messages=session.history.messages,
+            tools=tools,
+        )
         token_ids = await backend.tokenize(
             rendered.text,
             add_special_tokens=False,
@@ -52,42 +51,42 @@ class AgentRuntime:
             )
             token_ids.extend(result.token_ids)
 
-            observation, _ = await session.step(result.text)
+            observation, _ = await session.step(backend.parse_action(result.text))
             for message in observation.feedback_messages:
                 yield message.model_dump(exclude_none=True)
             if observation.done:
                 return
-            token_ids.extend(
-                await backend.tokenize(
-                    observation.feedback_text,
-                    add_special_tokens=False,
-                )
+
+            feedback = backend.render_feedback(
+                messages=session.history.messages,
+                environment_messages=[
+                    message.model_dump(exclude_none=True)
+                    for message in observation.environment_messages
+                ],
+                tools=tools,
             )
-            images.extend(observation.environment_images)
+            token_ids.extend(
+                await backend.tokenize(feedback.text, add_special_tokens=False)
+            )
+            images.extend(feedback.images)
 
     async def _run_action(
         self,
         backend: ActionBackend,
         messages: Sequence[dict[str, Any]],
     ) -> AsyncIterator[dict[str, Any]]:
-        history = Conversation([*await self.environment.reset(), *messages])
-        tools = self.environment.tools_manifest()
-
+        session = AgentSession(environment=self.environment)
+        await session.reset(messages)
         while True:
             action = await backend.generate(
-                history.messages,
-                tools=tools,
+                session.history.messages,
+                tools=self.environment.tools_manifest(),
                 max_tokens=self.max_tokens,
             )
-            action_message = action.to_message()
-            history.append(action_message)
-
-            observation_messages, done = await self.environment.step(action)
-            history.extend(observation_messages)
-
-            for message in [action_message, *observation_messages]:
+            observation, _ = await session.step(action)
+            for message in observation.feedback_messages:
                 yield message.model_dump(exclude_none=True)
-            if done:
+            if observation.done:
                 return
 
     async def run_steps(
@@ -97,9 +96,7 @@ class AgentRuntime:
         """Yield each assistant action and environment observation."""
 
         if isinstance(self.backend, CompletionBackend):
-            if self.protocol is None:
-                raise ValueError("CompletionBackend requires a CompletionProtocol.")
-            runner = self._run_completion(self.backend, self.protocol, messages)
+            runner = self._run_completion(self.backend, messages)
         else:
             runner = self._run_action(self.backend, messages)
 

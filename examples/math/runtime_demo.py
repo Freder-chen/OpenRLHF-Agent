@@ -21,10 +21,10 @@ async def main() -> None:
     agent_runtime = AgentRuntime(
         backend=VLLMCompletionBackend(
             model="qwen3",
-            base_url="http://localhost:8009/v1",
+            base_url="http://localhost:8009",
             api_key="empty",
+            protocol=Qwen3Protocol(enable_thinking=True),
         ),
-        protocol=Qwen3Protocol(enable_thinking=True),
         environment=SingleTurnEnvironment(system_prompt=EVAL_SYSTEM_PROMPT),
     )
     messages = [{"role": "user", "content": "1+1=?"}]

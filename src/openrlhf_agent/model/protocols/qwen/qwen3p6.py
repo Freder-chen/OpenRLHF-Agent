@@ -32,7 +32,7 @@ class Qwen3p6Protocol(CompletionProtocol):
             }
         )
 
-    def parse_action(self, text: str) -> Action:
+    def _parse_action(self, text: str) -> Action:
         """Parse optional reasoning followed by a final answer or tool calls."""
 
         return parse_nested_tool_action(text, enable_thinking=self.enable_thinking)

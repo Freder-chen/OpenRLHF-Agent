@@ -6,7 +6,7 @@ from openrlhf_agent.agentkit.environments import FunctionCallEnvironment
 from openrlhf_agent.agentkit.tools import WikiSearchTool
 
 RETRIEVER_URL = "http://localhost:8000/retrieve"
-BASE_URL = "http://localhost:8010/v1"
+BASE_URL = "http://localhost:8010"
 API_KEY = "empty"
 MODEL = "qwen3"
 
@@ -28,8 +28,8 @@ async def main() -> None:
             base_url=BASE_URL,
             api_key=API_KEY,
             model=MODEL,
+            protocol=Qwen3Protocol(enable_thinking=False),
         ),
-        protocol=Qwen3Protocol(enable_thinking=False),
         environment=FunctionCallEnvironment(
             system_prompt=SYSTEM_PROMPT,
             tools=[WikiSearchTool(base_url=RETRIEVER_URL)],

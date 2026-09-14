@@ -50,8 +50,9 @@ async def evaluate(
 
     async with VLLMCompletionBackend(
         model="qwen3",
-        base_url="http://localhost:8009/v1",
+        base_url="http://localhost:8009",
         api_key="empty",
+        protocol=Qwen3Protocol(enable_thinking=True),
     ) as backend:
         sem = asyncio.Semaphore(concurrency)
 
@@ -63,7 +64,6 @@ async def evaluate(
                 try:
                     runtime = AgentRuntime(
                         backend=backend,
-                        protocol=Qwen3Protocol(enable_thinking=True),
                         environment=SingleTurnEnvironment(system_prompt=EVAL_SYSTEM_PROMPT),
                     )
                     pred = await runtime.run_final(

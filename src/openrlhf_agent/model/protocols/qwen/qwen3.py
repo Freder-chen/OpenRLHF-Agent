@@ -19,7 +19,7 @@ class Qwen3Protocol(CompletionProtocol):
         self.enable_thinking = enable_thinking
         super().__init__(template_kwargs={"enable_thinking": enable_thinking})
 
-    def parse_action(self, text: str) -> Action:
+    def _parse_action(self, text: str) -> Action:
         """Parse optional reasoning followed by a final answer or tool calls."""
 
         return parse_json_tool_action(text, enable_thinking=self.enable_thinking)

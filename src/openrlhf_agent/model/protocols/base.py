@@ -116,6 +116,53 @@ class CompletionProtocol(ABC):
         )
         return RenderedPrompt(text=text, images=images)
 
-    @abstractmethod
+    def render_feedback(
+        self,
+        *,
+        messages: Sequence[Mapping[str, Any]],
+        environment_messages: Sequence[Mapping[str, Any]],
+        tools: Sequence[Mapping[str, Any]] | None = None,
+    ) -> RenderedPrompt:
+        """Render only the prompt suffix added after an assistant action."""
+
+        previous_messages = (
+            messages[: -len(environment_messages)]
+            if environment_messages
+            else messages
+        )
+        before = self.render(messages=previous_messages, tools=tools)
+        after = self.render(
+            messages=messages,
+            tools=tools,
+            add_generation_prompt=True,
+        )
+
+        # Completion tokens already contain the assistant text. Keep only the
+        # template separator, environment messages, and next generation prompt.
+        prefix = before.text.removesuffix("\n")
+        separator = before.text[len(prefix) :]
+        if after.text.startswith(prefix):
+            return RenderedPrompt(
+                text=after.text[len(prefix) :],
+                images=after.images[len(before.images) :],
+            )
+
+        feedback = self.render(
+            messages=environment_messages,
+            add_generation_prompt=True,
+        )
+        return RenderedPrompt(
+            text=separator + feedback.text,
+            images=feedback.images,
+        )
+
     def parse_action(self, text: str) -> Action:
         """Parse generated assistant text into an action."""
+
+        action = self._parse_action(text)
+        action.raw_text = text
+        return action
+
+    @abstractmethod
+    def _parse_action(self, text: str) -> Action:
+        """Implement model-specific action parsing."""
